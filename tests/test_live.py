@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Integration test against a real IRC server (irc.oftc.net).
 
@@ -6,7 +6,7 @@ Starts its own proxy instance, connects to OFTC, joins a test channel,
 sends a single message, verifies state, and cleans up.
 
 Usage:
-    python3 tests/test_live.py
+    python tests/test_live.py
 """
 
 import os

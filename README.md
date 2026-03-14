@@ -8,7 +8,7 @@ Events.
 
 ```bash
 pip install -r requirements.txt
-python3 -m lipservice
+python -m lipservice
 ```
 
 The server starts on `http://127.0.0.1:8080`.
