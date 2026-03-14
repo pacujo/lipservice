@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import asyncio
+import time
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+
+@dataclass
+class MemberInfo:
+    nick: str
+    prefix: str = ""
+    user: str = ""
+    host: str = ""
+
+
+@dataclass
+class ChannelState:
+    name: str
+    topic: str = ""
+    topic_set_by: str = ""
+    members: dict[str, MemberInfo] = field(default_factory=dict)
+    messages: deque = field(default_factory=lambda: deque(maxlen=1000))
+
+
+@dataclass
+class NetworkState:
+    name: str
+    host: str
+    port: int
+    tls: bool
+    nick: str
+    server_password: str | None = None
+    state: str = "disconnected"
+    channels: dict[str, ChannelState] = field(default_factory=dict)
+    private_messages: dict[str, deque] = field(default_factory=dict)
+    irc_user: str = ""
+    irc_host: str = ""
+    modes: str = ""
+    client: object = None
+    read_task: object = None
+
+
+class EventBus:
+    def __init__(self):
+        self._subscribers: list[asyncio.Queue] = []
+        self._counter = 0
+
+    def subscribe(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=4096)
+        self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue):
+        try:
+            self._subscribers.remove(q)
+        except ValueError:
+            pass
+
+    async def publish(self, event_type: str, data: dict):
+        self._counter += 1
+        event = {
+            "id": f"evt_{self._counter:06d}",
+            "event": event_type,
+            "data": data,
+        }
+        for q in self._subscribers:
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+
+class ProxyState:
+    def __init__(self, max_backlog: int = 1000):
+        self.networks: dict[str, NetworkState] = {}
+        self.event_bus = EventBus()
+        self.start_time = time.time()
+        self.max_backlog = max_backlog
+        self._msg_counter = 0
+
+    def next_message_id(self) -> str:
+        self._msg_counter += 1
+        return f"msg_{self._msg_counter:06d}"
+
+    async def handle_irc_event(self, network_name: str, event_type: str, data: dict):
+        net = self.networks.get(network_name)
+        if not net:
+            return
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        if event_type == "network_state":
+            net.state = data["state"]
+            await self.event_bus.publish("network_state", {
+                "network": network_name,
+                "state": data["state"],
+            })
+
+        elif event_type == "message":
+            msg_id = self.next_message_id()
+            msg = {
+                "id": msg_id,
+                "time": now,
+                "from": data["from"],
+                "type": data["type"],
+                "text": data["text"],
+            }
+            if "channel" in data:
+                channel = data["channel"]
+                if channel not in net.channels:
+                    net.channels[channel] = ChannelState(name=channel)
+                net.channels[channel].messages.append(msg)
+                await self.event_bus.publish("message", {
+                    "network": network_name, "channel": channel, **msg,
+                })
+            else:
+                nick = data.get("nick", data["from"])
+                if nick not in net.private_messages:
+                    net.private_messages[nick] = deque(maxlen=self.max_backlog)
+                net.private_messages[nick].append(msg)
+                await self.event_bus.publish("message", {
+                    "network": network_name, "nick": nick, **msg,
+                })
+
+        elif event_type == "join":
+            channel = data["channel"]
+            if channel not in net.channels:
+                net.channels[channel] = ChannelState(name=channel)
+            net.channels[channel].members[data["nick"]] = MemberInfo(
+                nick=data["nick"],
+                user=data.get("user", ""),
+                host=data.get("host", ""),
+            )
+            await self.event_bus.publish("join", {
+                "network": network_name, **data,
+            })
+
+        elif event_type == "part":
+            channel = data["channel"]
+            if channel in net.channels:
+                net.channels[channel].members.pop(data["nick"], None)
+                if data["nick"] == net.nick:
+                    del net.channels[channel]
+            await self.event_bus.publish("part", {
+                "network": network_name, **data,
+            })
+
+        elif event_type == "quit":
+            for ch in net.channels.values():
+                ch.members.pop(data["nick"], None)
+            await self.event_bus.publish("quit", {
+                "network": network_name, **data,
+            })
+
+        elif event_type == "kick":
+            channel = data["channel"]
+            if channel in net.channels:
+                net.channels[channel].members.pop(data["nick"], None)
+                if data["nick"] == net.nick:
+                    del net.channels[channel]
+            await self.event_bus.publish("kick", {
+                "network": network_name, **data,
+            })
+
+        elif event_type == "topic":
+            channel = data["channel"]
+            if channel in net.channels:
+                net.channels[channel].topic = data.get("text", "")
+                net.channels[channel].topic_set_by = data.get("set_by", "")
+            await self.event_bus.publish("topic", {
+                "network": network_name, **data,
+            })
+
+        elif event_type == "nick":
+            if data["old_nick"] == net.nick:
+                net.nick = data["new_nick"]
+            for ch in net.channels.values():
+                if data["old_nick"] in ch.members:
+                    member = ch.members.pop(data["old_nick"])
+                    member.nick = data["new_nick"]
+                    ch.members[data["new_nick"]] = member
+            await self.event_bus.publish("nick", {
+                "network": network_name, **data,
+            })
+
+        elif event_type == "_names":
+            channel = data["channel"]
+            if channel not in net.channels:
+                net.channels[channel] = ChannelState(name=channel)
+            net.channels[channel].members[data["nick"]] = MemberInfo(
+                nick=data["nick"], prefix=data.get("prefix", ""),
+            )
+
+        elif event_type == "mode":
+            await self.event_bus.publish("mode", {
+                "network": network_name, **data,
+            })
+
+        elif event_type == "error":
+            await self.event_bus.publish("error", {
+                "network": network_name, **data,
+            })
+
+        elif event_type == "raw":
+            await self.event_bus.publish("raw", {
+                "network": network_name, **data,
+            })
