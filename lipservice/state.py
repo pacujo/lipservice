@@ -5,6 +5,10 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from lipservice.irc import IRCClient
 
 
 @dataclass
@@ -21,7 +25,7 @@ class ChannelState:
     topic: str = ""
     topic_set_by: str = ""
     members: dict[str, MemberInfo] = field(default_factory=dict)
-    messages: deque = field(default_factory=lambda: deque(maxlen=1000))
+    messages: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=1000))
 
 
 @dataclass
@@ -34,33 +38,33 @@ class NetworkState:
     server_password: str | None = None
     state: str = "disconnected"
     channels: dict[str, ChannelState] = field(default_factory=dict)
-    private_messages: dict[str, deque] = field(default_factory=dict)
+    private_messages: dict[str, deque[dict[str, Any]]] = field(default_factory=dict)
     irc_user: str = ""
     irc_host: str = ""
     modes: str = ""
-    client: object = None
-    read_task: object = None
+    client: IRCClient | None = None
+    read_task: asyncio.Task[None] | None = None
 
 
 class EventBus:
-    def __init__(self):
-        self._subscribers: list[asyncio.Queue] = []
-        self._counter = 0
+    def __init__(self) -> None:
+        self._subscribers: list[asyncio.Queue[dict[str, Any]]] = []
+        self._counter: int = 0
 
-    def subscribe(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue(maxsize=4096)
+    def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
+        q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=4096)
         self._subscribers.append(q)
         return q
 
-    def unsubscribe(self, q: asyncio.Queue):
+    def unsubscribe(self, q: asyncio.Queue[dict[str, Any]]) -> None:
         try:
             self._subscribers.remove(q)
         except ValueError:
             pass
 
-    async def publish(self, event_type: str, data: dict):
+    async def publish(self, event_type: str, data: dict[str, Any]) -> None:
         self._counter += 1
-        event = {
+        event: dict[str, Any] = {
             "id": f"evt_{self._counter:06d}",
             "event": event_type,
             "data": data,
@@ -73,23 +77,25 @@ class EventBus:
 
 
 class ProxyState:
-    def __init__(self, max_backlog: int = 1000):
+    def __init__(self, max_backlog: int = 1000) -> None:
         self.networks: dict[str, NetworkState] = {}
-        self.event_bus = EventBus()
-        self.start_time = time.time()
-        self.max_backlog = max_backlog
-        self._msg_counter = 0
+        self.event_bus: EventBus = EventBus()
+        self.start_time: float = time.time()
+        self.max_backlog: int = max_backlog
+        self._msg_counter: int = 0
 
     def next_message_id(self) -> str:
         self._msg_counter += 1
         return f"msg_{self._msg_counter:06d}"
 
-    async def handle_irc_event(self, network_name: str, event_type: str, data: dict):
+    async def handle_irc_event(
+        self, network_name: str, event_type: str, data: dict[str, Any],
+    ) -> None:
         net = self.networks.get(network_name)
         if not net:
             return
 
-        now = datetime.now(timezone.utc).isoformat()
+        now: str = datetime.now(timezone.utc).isoformat()
 
         if event_type == "network_state":
             net.state = data["state"]
@@ -100,7 +106,7 @@ class ProxyState:
 
         elif event_type == "message":
             msg_id = self.next_message_id()
-            msg = {
+            msg: dict[str, Any] = {
                 "id": msg_id,
                 "time": now,
                 "from": data["from"],
@@ -108,7 +114,7 @@ class ProxyState:
                 "text": data["text"],
             }
             if "channel" in data:
-                channel = data["channel"]
+                channel: str = data["channel"]
                 if channel not in net.channels:
                     net.channels[channel] = ChannelState(name=channel)
                 net.channels[channel].messages.append(msg)
@@ -116,7 +122,7 @@ class ProxyState:
                     "network": network_name, "channel": channel, **msg,
                 })
             else:
-                nick = data.get("nick", data["from"])
+                nick: str = data.get("nick", data["from"])
                 if nick not in net.private_messages:
                     net.private_messages[nick] = deque(maxlen=self.max_backlog)
                 net.private_messages[nick].append(msg)

@@ -4,7 +4,7 @@ import secrets
 import time
 from dataclasses import dataclass
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 
 from lipservice.config import settings
 
@@ -18,12 +18,12 @@ class TokenEntry:
 
 
 class TokenStore:
-    def __init__(self):
+    def __init__(self) -> None:
         self._tokens: dict[str, TokenEntry] = {}
 
     def create(self, username: str) -> TokenEntry:
-        token = "ls_" + secrets.token_hex(24)
-        now = time.time()
+        token: str = "ls_" + secrets.token_hex(24)
+        now: float = time.time()
         entry = TokenEntry(
             token=token,
             username=username,
@@ -42,15 +42,15 @@ class TokenStore:
             return None
         return entry
 
-    def revoke(self, token: str):
+    def revoke(self, token: str) -> None:
         self._tokens.pop(token, None)
 
 
-token_store = TokenStore()
+token_store: TokenStore = TokenStore()
 
 
 def _extract_token(request: Request) -> str:
-    auth = request.headers.get("Authorization", "")
+    auth: str = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail={
             "error": "unauthorized", "message": "Missing or malformed Authorization header.",
@@ -59,7 +59,7 @@ def _extract_token(request: Request) -> str:
 
 
 async def require_auth(request: Request) -> TokenEntry:
-    raw = _extract_token(request)
+    raw: str = _extract_token(request)
     entry = token_store.validate(raw)
     if entry is None:
         raise HTTPException(status_code=401, detail={

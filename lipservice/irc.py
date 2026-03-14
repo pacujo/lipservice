@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import ssl
-from dataclasses import dataclass, field
-from typing import Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -16,7 +17,7 @@ class IRCMessage:
 
 def parse_irc(line: str) -> IRCMessage:
     tags: dict[str, str] = {}
-    prefix = None
+    prefix: str | None = None
 
     if line.startswith("@"):
         tag_str, line = line[1:].split(" ", 1)
@@ -52,7 +53,7 @@ def format_irc(command: str, *params: str) -> str:
     return " ".join([command] + head + [tail])
 
 
-EventCallback = Callable[[str, str, dict], Awaitable[None]]
+EventCallback = Callable[[str, str, dict[str, Any]], Awaitable[None]]
 
 
 class IRCClient:
@@ -66,24 +67,24 @@ class IRCClient:
         user: str,
         password: str | None,
         on_event: EventCallback,
-    ):
-        self.network_name = network_name
-        self.host = host
-        self.port = port
-        self.tls = tls
-        self.nick = nick
-        self.user = user
-        self.password = password
-        self.on_event = on_event
+    ) -> None:
+        self.network_name: str = network_name
+        self.host: str = host
+        self.port: int = port
+        self.tls: bool = tls
+        self.nick: str = nick
+        self.user: str = user
+        self.password: str | None = password
+        self.on_event: EventCallback = on_event
 
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
-        self._read_task: asyncio.Task | None = None
-        self.connected = False
-        self.registered = False
+        self._read_task: asyncio.Task[None] | None = None
+        self.connected: bool = False
+        self.registered: bool = False
 
-    async def connect(self):
-        ssl_ctx = None
+    async def connect(self) -> None:
+        ssl_ctx: ssl.SSLContext | None = None
         if self.tls:
             ssl_ctx = ssl.create_default_context()
 
@@ -99,7 +100,7 @@ class IRCClient:
 
         self._read_task = asyncio.create_task(self._read_loop())
 
-    async def disconnect(self):
+    async def disconnect(self) -> None:
         if self._writer:
             try:
                 await self.send("QUIT", "Lipservice")
@@ -121,38 +122,38 @@ class IRCClient:
         self._reader = None
         self._writer = None
 
-    async def send(self, command: str, *params: str):
+    async def send(self, command: str, *params: str) -> None:
         if not self._writer:
             return
-        line = format_irc(command, *params)
+        line: str = format_irc(command, *params)
         self._writer.write(f"{line}\r\n".encode("utf-8"))
         await self._writer.drain()
 
-    async def join(self, channel: str, key: str | None = None):
+    async def join(self, channel: str, key: str | None = None) -> None:
         if key:
             await self.send("JOIN", channel, key)
         else:
             await self.send("JOIN", channel)
 
-    async def part(self, channel: str, message: str | None = None):
+    async def part(self, channel: str, message: str | None = None) -> None:
         if message:
             await self.send("PART", channel, message)
         else:
             await self.send("PART", channel)
 
-    async def privmsg(self, target: str, text: str):
+    async def privmsg(self, target: str, text: str) -> None:
         await self.send("PRIVMSG", target, text)
 
-    async def notice(self, target: str, text: str):
+    async def notice(self, target: str, text: str) -> None:
         await self.send("NOTICE", target, text)
 
-    async def set_nick(self, new_nick: str):
+    async def set_nick(self, new_nick: str) -> None:
         await self.send("NICK", new_nick)
 
-    async def set_topic(self, channel: str, text: str):
+    async def set_topic(self, channel: str, text: str) -> None:
         await self.send("TOPIC", channel, text)
 
-    async def send_raw(self, raw_line: str):
+    async def send_raw(self, raw_line: str) -> None:
         if not self._writer:
             return
         self._writer.write(f"{raw_line}\r\n".encode("utf-8"))
@@ -160,7 +161,8 @@ class IRCClient:
 
     # -- read loop & handlers ------------------------------------------------
 
-    async def _read_loop(self):
+    async def _read_loop(self) -> None:
+        assert self._reader is not None
         try:
             while True:
                 data = await self._reader.readline()
@@ -183,7 +185,7 @@ class IRCClient:
                 self.network_name, "network_state", {"state": "disconnected"},
             )
 
-    async def _handle(self, msg: IRCMessage):
+    async def _handle(self, msg: IRCMessage) -> None:
         handler = {
             "PING": self._on_ping,
             "001": self._on_welcome,
@@ -211,10 +213,10 @@ class IRCClient:
             return nick, user, host
         return prefix, "", ""
 
-    async def _on_ping(self, msg: IRCMessage):
+    async def _on_ping(self, msg: IRCMessage) -> None:
         await self.send("PONG", *msg.params)
 
-    async def _on_welcome(self, msg: IRCMessage):
+    async def _on_welcome(self, msg: IRCMessage) -> None:
         self.registered = True
         if msg.params:
             self.nick = msg.params[0]
@@ -222,99 +224,99 @@ class IRCClient:
             self.network_name, "network_state", {"state": "connected"},
         )
 
-    async def _on_nick_in_use(self, msg: IRCMessage):
+    async def _on_nick_in_use(self, msg: IRCMessage) -> None:
         self.nick = self.nick + "_"
         await self.send("NICK", self.nick)
 
-    async def _on_privmsg(self, msg: IRCMessage):
+    async def _on_privmsg(self, msg: IRCMessage) -> None:
         nick, user, host = self._parse_prefix(msg.prefix or "")
-        target = msg.params[0]
-        text = msg.params[1] if len(msg.params) > 1 else ""
+        target: str = msg.params[0]
+        text: str = msg.params[1] if len(msg.params) > 1 else ""
 
-        msg_type = "privmsg"
+        msg_type: str = "privmsg"
         if text.startswith("\x01ACTION ") and text.endswith("\x01"):
             msg_type = "action"
             text = text[8:-1]
 
-        is_channel = target.startswith(("#", "&", "+", "!"))
-        data: dict = {"from": nick, "type": msg_type, "text": text}
+        is_channel: bool = target.startswith(("#", "&", "+", "!"))
+        data: dict[str, Any] = {"from": nick, "type": msg_type, "text": text}
         if is_channel:
             data["channel"] = target
         else:
             data["nick"] = nick
         await self.on_event(self.network_name, "message", data)
 
-    async def _on_notice(self, msg: IRCMessage):
+    async def _on_notice(self, msg: IRCMessage) -> None:
         nick, _, _ = self._parse_prefix(msg.prefix or "")
-        target = msg.params[0]
-        text = msg.params[1] if len(msg.params) > 1 else ""
+        target: str = msg.params[0]
+        text: str = msg.params[1] if len(msg.params) > 1 else ""
 
-        is_channel = target.startswith(("#", "&", "+", "!"))
-        data: dict = {"from": nick, "type": "notice", "text": text}
+        is_channel: bool = target.startswith(("#", "&", "+", "!"))
+        data: dict[str, Any] = {"from": nick, "type": "notice", "text": text}
         if is_channel:
             data["channel"] = target
         else:
             data["nick"] = nick
         await self.on_event(self.network_name, "message", data)
 
-    async def _on_join(self, msg: IRCMessage):
+    async def _on_join(self, msg: IRCMessage) -> None:
         nick, user, host = self._parse_prefix(msg.prefix or "")
-        channel = msg.params[0]
+        channel: str = msg.params[0]
         await self.on_event(self.network_name, "join", {
             "channel": channel, "nick": nick, "user": user, "host": host,
         })
 
-    async def _on_part(self, msg: IRCMessage):
+    async def _on_part(self, msg: IRCMessage) -> None:
         nick, _, _ = self._parse_prefix(msg.prefix or "")
-        channel = msg.params[0]
-        message = msg.params[1] if len(msg.params) > 1 else ""
+        channel: str = msg.params[0]
+        message: str = msg.params[1] if len(msg.params) > 1 else ""
         await self.on_event(self.network_name, "part", {
             "channel": channel, "nick": nick, "message": message,
         })
 
-    async def _on_quit(self, msg: IRCMessage):
+    async def _on_quit(self, msg: IRCMessage) -> None:
         nick, _, _ = self._parse_prefix(msg.prefix or "")
-        message = msg.params[0] if msg.params else ""
+        message: str = msg.params[0] if msg.params else ""
         await self.on_event(self.network_name, "quit", {
             "nick": nick, "message": message,
         })
 
-    async def _on_kick(self, msg: IRCMessage):
+    async def _on_kick(self, msg: IRCMessage) -> None:
         nick, _, _ = self._parse_prefix(msg.prefix or "")
-        channel = msg.params[0]
-        kicked = msg.params[1] if len(msg.params) > 1 else ""
-        message = msg.params[2] if len(msg.params) > 2 else ""
+        channel: str = msg.params[0]
+        kicked: str = msg.params[1] if len(msg.params) > 1 else ""
+        message: str = msg.params[2] if len(msg.params) > 2 else ""
         await self.on_event(self.network_name, "kick", {
             "channel": channel, "nick": kicked, "by": nick, "message": message,
         })
 
-    async def _on_topic(self, msg: IRCMessage):
+    async def _on_topic(self, msg: IRCMessage) -> None:
         nick, _, _ = self._parse_prefix(msg.prefix or "")
-        channel = msg.params[0]
-        text = msg.params[1] if len(msg.params) > 1 else ""
+        channel: str = msg.params[0]
+        text: str = msg.params[1] if len(msg.params) > 1 else ""
         await self.on_event(self.network_name, "topic", {
             "channel": channel, "text": text, "set_by": nick,
         })
 
-    async def _on_topic_rpl(self, msg: IRCMessage):
-        channel = msg.params[1] if len(msg.params) > 1 else ""
-        text = msg.params[2] if len(msg.params) > 2 else ""
+    async def _on_topic_rpl(self, msg: IRCMessage) -> None:
+        channel: str = msg.params[1] if len(msg.params) > 1 else ""
+        text: str = msg.params[2] if len(msg.params) > 2 else ""
         await self.on_event(self.network_name, "topic", {
             "channel": channel, "text": text, "set_by": "",
         })
 
-    async def _on_nick(self, msg: IRCMessage):
+    async def _on_nick(self, msg: IRCMessage) -> None:
         old_nick, _, _ = self._parse_prefix(msg.prefix or "")
-        new_nick = msg.params[0] if msg.params else ""
+        new_nick: str = msg.params[0] if msg.params else ""
         if old_nick == self.nick:
             self.nick = new_nick
         await self.on_event(self.network_name, "nick", {
             "old_nick": old_nick, "new_nick": new_nick,
         })
 
-    async def _on_names(self, msg: IRCMessage):
-        channel = msg.params[2] if len(msg.params) > 2 else ""
-        names_str = msg.params[3] if len(msg.params) > 3 else ""
+    async def _on_names(self, msg: IRCMessage) -> None:
+        channel: str = msg.params[2] if len(msg.params) > 2 else ""
+        names_str: str = msg.params[3] if len(msg.params) > 3 else ""
         for name in names_str.split():
             prefix = ""
             while name and name[0] in "@+%~&":
@@ -324,10 +326,10 @@ class IRCClient:
                 "channel": channel, "nick": name, "prefix": prefix,
             })
 
-    async def _on_mode(self, msg: IRCMessage):
-        target = msg.params[0] if msg.params else ""
-        modes = msg.params[1] if len(msg.params) > 1 else ""
-        params = msg.params[2:]
+    async def _on_mode(self, msg: IRCMessage) -> None:
+        target: str = msg.params[0] if msg.params else ""
+        modes: str = msg.params[1] if len(msg.params) > 1 else ""
+        params: list[str] = msg.params[2:]
         await self.on_event(self.network_name, "mode", {
             "target": target, "modes": modes, "params": params,
         })
