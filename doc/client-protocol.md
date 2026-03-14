@@ -8,14 +8,11 @@ Lipservice is an IRC proxy (bouncer) that maintains persistent connections to
 IRC servers on behalf of clients. Clients interact with Lipservice through a
 RESTful HTTP API — IRC is only spoken on the server side.
 
-```
-┌────────┐           ┌─────────────┐         ┌────────────┐
-│        │  REST API │             │         │            │
-│ Client │◄─────────►│  Lipservice │◄───────►│ IRC Server │
-│        │  (HTTP)   │    Proxy    │ (raw IRC)│            │
-│        │◄──────────│             │         │            │
-│        │  (SSE)    │             │         │            │
-└────────┘           └─────────────┘         └────────────┘
+```mermaid
+graph LR
+    Client -->|REST API\nHTTP| Proxy[Lipservice\nProxy]
+    Proxy -->|SSE| Client
+    Proxy <-->|raw IRC| Server[IRC Server]
 ```
 
 ### Design Goals
