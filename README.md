@@ -120,6 +120,19 @@ for the full specification.
 | `GET` | `/events` | SSE event stream |
 | `GET` | `/status` | Proxy status |
 
+## Testing
+
+```bash
+python -m pytest tests/
+```
+
+There is also a live integration test that connects to a real IRC server
+(`irc.oftc.net`):
+
+```bash
+python tests/test_live.py
+```
+
 ## Project Structure
 
 ```
@@ -134,6 +147,11 @@ lipservice/
 │   ├── models.py             Pydantic request/response models
 │   ├── routes.py             REST API routes
 │   └── state.py              In-memory state and event bus
+├── tests/
+│   ├── conftest.py            Shared fixtures
+│   ├── test_api.py            API unit tests
+│   ├── test_irc.py            IRC parser tests
+│   └── test_live.py           Live integration test
 ├── requirements.txt
 └── README.md
 ```
