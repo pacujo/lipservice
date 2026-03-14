@@ -25,13 +25,18 @@ class MemberInfo:
     host: str = ""
 
 
-@dataclass
 class ChannelState:
-    name: str
-    topic: str = ""
-    topic_set_by: str = ""
-    members: dict[str, MemberInfo] = field(default_factory=dict)
-    messages: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=1000))
+    __slots__ = ("name", "topic", "topic_set_by", "members", "messages")
+
+    def __init__(
+        self, name: str, *, topic: str = "", topic_set_by: str = "",
+        max_backlog: int = 1000,
+    ) -> None:
+        self.name = name
+        self.topic = topic
+        self.topic_set_by = topic_set_by
+        self.members: dict[str, MemberInfo] = {}
+        self.messages: deque[dict[str, Any]] = deque(maxlen=max_backlog)
 
 
 @dataclass
@@ -139,7 +144,9 @@ class ProxyState:
             if "channel" in data:
                 channel: str = data["channel"]
                 if channel not in net.channels:
-                    net.channels[channel] = ChannelState(name=channel)
+                    net.channels[channel] = ChannelState(
+                        name=channel, max_backlog=self.max_backlog,
+                    )
                 net.channels[channel].messages.append(msg)
                 await self.event_bus.publish("message", {
                     "network": network_name, "channel": channel, **msg,
@@ -156,7 +163,9 @@ class ProxyState:
         elif event_type == "join":
             channel = data["channel"]
             if channel not in net.channels:
-                net.channels[channel] = ChannelState(name=channel)
+                net.channels[channel] = ChannelState(
+                    name=channel, max_backlog=self.max_backlog,
+                )
             net.channels[channel].members[data["nick"]] = MemberInfo(
                 nick=data["nick"],
                 user=data.get("user", ""),
@@ -217,7 +226,9 @@ class ProxyState:
         elif event_type == "_names":
             channel = data["channel"]
             if channel not in net.channels:
-                net.channels[channel] = ChannelState(name=channel)
+                net.channels[channel] = ChannelState(
+                    name=channel, max_backlog=self.max_backlog,
+                )
             net.channels[channel].members[data["nick"]] = MemberInfo(
                 nick=data["nick"], prefix=data.get("prefix", ""),
             )

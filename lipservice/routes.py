@@ -351,7 +351,9 @@ async def send_channel_message(
     }
 
     if channel not in net.channels:
-        net.channels[channel] = ChannelState(name=channel)
+        net.channels[channel] = ChannelState(
+            name=channel, max_backlog=proxy.max_backlog,
+        )
     net.channels[channel].messages.append(msg)
 
     return msg
