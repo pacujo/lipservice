@@ -205,7 +205,7 @@ async def list_channels(network: str, _auth: TokenEntry = Depends(require_auth))
     return result
 
 
-@router.get("/networks/{network}/channels/{channel:path}")
+@router.get("/networks/{network}/channels/{channel}")
 async def get_channel(network: str, channel: str, _auth: TokenEntry = Depends(require_auth)):
     net = _get_network(network)
     ch = net.channels.get(channel)
@@ -244,13 +244,13 @@ async def join_channel(network: str, body: ChannelJoin, _auth: TokenEntry = Depe
     }
 
 
-@router.delete("/networks/{network}/channels/{channel:path}", status_code=204)
+@router.delete("/networks/{network}/channels/{channel}", status_code=204)
 async def part_channel(network: str, channel: str, _auth: TokenEntry = Depends(require_auth)):
     net = _get_connected_network(network)
     await net.client.part(channel)
 
 
-@router.put("/networks/{network}/channels/{channel:path}/topic")
+@router.put("/networks/{network}/channels/{channel}/topic")
 async def set_topic(network: str, channel: str, body: TopicUpdate, _auth: TokenEntry = Depends(require_auth)):
     net = _get_connected_network(network)
     await net.client.set_topic(channel, body.text)
@@ -267,7 +267,7 @@ async def set_topic(network: str, channel: str, body: TopicUpdate, _auth: TokenE
 
 # -- Members --------------------------------------------------------------
 
-@router.get("/networks/{network}/channels/{channel:path}/members")
+@router.get("/networks/{network}/channels/{channel}/members")
 async def list_members(network: str, channel: str, _auth: TokenEntry = Depends(require_auth)):
     net = _get_network(network)
     ch = net.channels.get(channel)
@@ -284,7 +284,7 @@ async def list_members(network: str, channel: str, _auth: TokenEntry = Depends(r
 
 # -- Messages -------------------------------------------------------------
 
-@router.get("/networks/{network}/channels/{channel:path}/messages")
+@router.get("/networks/{network}/channels/{channel}/messages")
 async def list_channel_messages(
     network: str,
     channel: str,
@@ -303,7 +303,7 @@ async def list_channel_messages(
     return _paginate_messages(ch.messages, limit, before, after)
 
 
-@router.post("/networks/{network}/channels/{channel:path}/messages", status_code=201)
+@router.post("/networks/{network}/channels/{channel}/messages", status_code=201)
 async def send_channel_message(
     network: str,
     channel: str,
