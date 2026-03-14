@@ -10,7 +10,7 @@ RESTful HTTP API — IRC is only spoken on the server side.
 
 ```mermaid
 graph LR
-    Client -->|REST API\nHTTP| Proxy[Lipservice\nProxy]
+    Client -->|REST API<br/>HTTP| Proxy[Lipservice<br/>Proxy]
     Proxy -->|SSE| Client
     Proxy <-->|raw IRC| Server[IRC Server]
 ```
