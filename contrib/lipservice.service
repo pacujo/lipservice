@@ -1,0 +1,23 @@
+[Unit]
+Description=Lipservice IRC proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lipservice
+Group=lipservice
+WorkingDirectory=/opt/lipservice
+ExecStart=/opt/lipservice/venv/bin/python -m lipservice
+Restart=on-failure
+RestartSec=5
+
+EnvironmentFile=/etc/lipservice/lipservice.env
+
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -133,10 +133,45 @@ There is also a live integration test that connects to a real IRC server
 python tests/test_live.py
 ```
 
+## Running as a systemd Service
+
+A sample unit file is provided in `contrib/lipservice.service`. To install it:
+
+```bash
+# Create a dedicated system user
+sudo useradd -r -s /usr/sbin/nologin lipservice
+
+# Deploy the application
+sudo mkdir -p /opt/lipservice
+sudo cp -r lipservice/ requirements.txt /opt/lipservice/
+sudo python -m venv /opt/lipservice/venv
+sudo /opt/lipservice/venv/bin/pip install -r /opt/lipservice/requirements.txt
+
+# Install the environment file and edit your credentials
+sudo mkdir -p /etc/lipservice
+sudo cp contrib/lipservice.env /etc/lipservice/
+sudo chmod 600 /etc/lipservice/lipservice.env
+sudo editor /etc/lipservice/lipservice.env
+
+# Install and start the service
+sudo cp contrib/lipservice.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now lipservice
+```
+
+Check status with:
+
+```bash
+sudo systemctl status lipservice
+sudo journalctl -u lipservice -f
+```
+
 ## Project Structure
 
 ```
 lipservice/
+├── contrib/
+│   └── lipservice.service    systemd unit file
 ├── doc/
 │   └── client-protocol.md   Protocol specification
 ├── lipservice/
