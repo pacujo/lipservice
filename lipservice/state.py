@@ -7,8 +7,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+import logging
+
 if TYPE_CHECKING:
     from lipservice.irc import IRCClient
+
+log: logging.Logger = logging.getLogger(__name__)
+
+_RECONNECT_DELAY_MAX: float = 300.0
 
 
 @dataclass
@@ -44,6 +50,9 @@ class NetworkState:
     modes: str = ""
     client: IRCClient | None = None
     read_task: asyncio.Task[None] | None = None
+    auto_reconnect: bool = False
+    reconnect_delay: float = 1.0
+    reconnect_task: asyncio.Task[None] | None = None
 
 
 class EventBus:
@@ -99,6 +108,20 @@ class ProxyState:
 
         if event_type == "network_state":
             net.state = data["state"]
+            if data["state"] == "connected":
+                net.reconnect_delay = 1.0
+                channels_to_rejoin = list(net.channels.keys())
+                if channels_to_rejoin and net.client:
+                    for ch_name in channels_to_rejoin:
+                        try:
+                            await net.client.join(ch_name)
+                        except Exception:
+                            pass
+            elif data["state"] == "disconnected":
+                for ch in net.channels.values():
+                    ch.members.clear()
+                if net.auto_reconnect:
+                    self._start_reconnect(network_name)
             await self.event_bus.publish("network_state", {
                 "network": network_name,
                 "state": data["state"],
@@ -213,3 +236,65 @@ class ProxyState:
             await self.event_bus.publish("raw", {
                 "network": network_name, **data,
             })
+
+    # -- auto-reconnect ------------------------------------------------------
+
+    def _start_reconnect(self, network_name: str) -> None:
+        net = self.networks.get(network_name)
+        if not net:
+            return
+        if net.reconnect_task and not net.reconnect_task.done():
+            net.reconnect_task.cancel()
+        net.reconnect_task = asyncio.create_task(
+            self._reconnect_loop(network_name),
+        )
+
+    async def _reconnect_loop(self, network_name: str) -> None:
+        from lipservice.irc import IRCClient
+
+        while True:
+            net = self.networks.get(network_name)
+            if not net or not net.auto_reconnect:
+                return
+
+            delay = net.reconnect_delay
+            log.info(
+                "Reconnecting to %s in %.0f s", network_name, delay,
+            )
+            await asyncio.sleep(delay)
+
+            net = self.networks.get(network_name)
+            if not net or not net.auto_reconnect:
+                return
+
+            client = IRCClient(
+                network_name=net.name,
+                host=net.host,
+                port=net.port,
+                tls=net.tls,
+                nick=net.nick,
+                user=net.nick,
+                password=net.server_password,
+                on_event=self.handle_irc_event,
+            )
+            net.client = client
+            net.state = "connecting"
+            try:
+                await client.connect()
+                log.info("Reconnected to %s (TCP up)", network_name)
+                return
+            except Exception:
+                log.warning(
+                    "Reconnect to %s failed, backing off", network_name,
+                )
+                net.state = "disconnected"
+                net.client = None
+                net.reconnect_delay = min(
+                    net.reconnect_delay * 2, _RECONNECT_DELAY_MAX,
+                )
+
+    def cancel_reconnect(self, net: NetworkState) -> None:
+        net.auto_reconnect = False
+        if net.reconnect_task and not net.reconnect_task.done():
+            net.reconnect_task.cancel()
+            net.reconnect_task = None

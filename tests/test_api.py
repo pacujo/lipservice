@@ -1,5 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
+from lipservice.routes import proxy
+
 
 class TestAuth:
     def test_create_token(self, client):
@@ -112,6 +114,9 @@ class TestNetworks:
             assert resp.json()["state"] == "connecting"
             mock.connect.assert_called_once()
 
+            net = proxy.networks["testnet"]
+            assert net.auto_reconnect is True
+
     def test_connect_idempotent(self, client, auth_headers):
         client.post("/api/networks", json={
             "name": "testnet", "host": "irc.example.com", "nick": "bot",
@@ -126,10 +131,13 @@ class TestNetworks:
             assert MockIRC.call_count == 1
 
     def test_disconnect(self, client, auth_headers, mock_network):
+        net = proxy.networks["testnet"]
+        net.auto_reconnect = True
         resp = client.post("/api/networks/testnet/disconnect", headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json()["state"] == "disconnected"
         mock_network.disconnect.assert_called_once()
+        assert net.auto_reconnect is False
 
 
 class TestChannels:

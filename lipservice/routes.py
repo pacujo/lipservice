@@ -129,6 +129,7 @@ async def update_network(
     updates: dict[str, Any] = body.model_dump(exclude_unset=True)
 
     if net.client and updates.keys() & _CONNECTION_FIELDS:
+        proxy.cancel_reconnect(net)
         await net.client.disconnect()
         net.client = None
         net.state = "disconnected"
@@ -143,6 +144,7 @@ async def delete_network(
     name: str, _auth: TokenEntry = Depends(require_auth),
 ) -> None:
     net = _get_network(name)
+    proxy.cancel_reconnect(net)
     if net.client:
         await net.client.disconnect()
     del proxy.networks[name]
@@ -172,6 +174,8 @@ async def connect_network(
     )
     net.client = client
     net.state = "connecting"
+    net.auto_reconnect = True
+    net.reconnect_delay = 1.0
     try:
         await client.connect()
     except Exception as exc:
@@ -189,6 +193,7 @@ async def disconnect_network(
     name: str, _auth: TokenEntry = Depends(require_auth),
 ) -> dict[str, Any]:
     net = _get_network(name)
+    proxy.cancel_reconnect(net)
     if net.client:
         await net.client.disconnect()
         net.client = None

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import ssl
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
+
+_KEEPALIVE_INTERVAL: int = 60
+_KEEPALIVE_TIMEOUT: int = 120
 
 
 @dataclass
@@ -80,6 +84,8 @@ class IRCClient:
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._read_task: asyncio.Task[None] | None = None
+        self._keepalive_task: asyncio.Task[None] | None = None
+        self._last_data: float = 0.0
         self.connected: bool = False
         self.registered: bool = False
 
@@ -92,6 +98,7 @@ class IRCClient:
             self.host, self.port, ssl=ssl_ctx,
         )
         self.connected = True
+        self._last_data = time.monotonic()
 
         if self.password:
             await self.send("PASS", self.password)
@@ -99,8 +106,16 @@ class IRCClient:
         await self.send("USER", self.user, "0", "*", self.nick)
 
         self._read_task = asyncio.create_task(self._read_loop())
+        self._keepalive_task = asyncio.create_task(self._keepalive_loop())
 
     async def disconnect(self) -> None:
+        if self._keepalive_task:
+            self._keepalive_task.cancel()
+            try:
+                await self._keepalive_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._keepalive_task = None
         if self._writer:
             try:
                 await self.send("QUIT", "Lipservice")
@@ -117,6 +132,7 @@ class IRCClient:
                 await self._read_task
             except (asyncio.CancelledError, Exception):
                 pass
+            self._read_task = None
         self.connected = False
         self.registered = False
         self._reader = None
@@ -159,6 +175,27 @@ class IRCClient:
         self._writer.write(f"{raw_line}\r\n".encode("utf-8"))
         await self._writer.drain()
 
+    # -- keepalive -----------------------------------------------------------
+
+    async def _keepalive_loop(self) -> None:
+        try:
+            while self.connected:
+                await asyncio.sleep(_KEEPALIVE_INTERVAL)
+                if not self.connected:
+                    break
+                elapsed: float = time.monotonic() - self._last_data
+                if elapsed >= _KEEPALIVE_TIMEOUT:
+                    if self._writer:
+                        self._writer.close()
+                    break
+                if elapsed >= _KEEPALIVE_INTERVAL:
+                    try:
+                        await self.send("PING", "lipservice")
+                    except Exception:
+                        break
+        except asyncio.CancelledError:
+            pass
+
     # -- read loop & handlers ------------------------------------------------
 
     async def _read_loop(self) -> None:
@@ -168,6 +205,7 @@ class IRCClient:
                 data = await self._reader.readline()
                 if not data:
                     break
+                self._last_data = time.monotonic()
                 line = data.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
