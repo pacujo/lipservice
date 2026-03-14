@@ -146,7 +146,7 @@ async def delete_network(name: str, _auth: TokenEntry = Depends(require_auth)):
 @router.post("/networks/{name}/connect")
 async def connect_network(name: str, _auth: TokenEntry = Depends(require_auth)):
     net = _get_network(name)
-    if net.state == "connected" and net.client and net.client.connected:
+    if net.state in ("connected", "connecting") and net.client:
         return _net_response(net)
 
     if net.client:
@@ -174,7 +174,6 @@ async def connect_network(name: str, _auth: TokenEntry = Depends(require_auth)):
             "error": "upstream",
             "message": f"Failed to connect: {exc}",
         })
-    net.state = "connected"
     return _net_response(net)
 
 

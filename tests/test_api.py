@@ -109,7 +109,7 @@ class TestNetworks:
 
             resp = client.post("/api/networks/testnet/connect", headers=auth_headers)
             assert resp.status_code == 200
-            assert resp.json()["state"] == "connected"
+            assert resp.json()["state"] == "connecting"
             mock.connect.assert_called_once()
 
     def test_connect_idempotent(self, client, auth_headers):

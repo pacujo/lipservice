@@ -169,8 +169,11 @@ class IRCClient:
                 line = data.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
-                msg = parse_irc(line)
-                await self._handle(msg)
+                try:
+                    msg = parse_irc(line)
+                    await self._handle(msg)
+                except Exception:
+                    pass
         except (asyncio.CancelledError, ConnectionError):
             pass
         finally:
