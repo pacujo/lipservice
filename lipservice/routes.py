@@ -117,10 +117,20 @@ async def create_network(body: NetworkCreate, _auth: TokenEntry = Depends(requir
     return _net_response(net)
 
 
+_CONNECTION_FIELDS = {"host", "port", "tls", "nick", "server_password"}
+
+
 @router.patch("/networks/{name}")
 async def update_network(name: str, body: NetworkUpdate, _auth: TokenEntry = Depends(require_auth)):
     net = _get_network(name)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    updates = body.model_dump(exclude_unset=True)
+
+    if net.client and updates.keys() & _CONNECTION_FIELDS:
+        await net.client.disconnect()
+        net.client = None
+        net.state = "disconnected"
+
+    for field, value in updates.items():
         setattr(net, field, value)
     return _net_response(net)
 
@@ -138,6 +148,10 @@ async def connect_network(name: str, _auth: TokenEntry = Depends(require_auth)):
     net = _get_network(name)
     if net.state == "connected" and net.client and net.client.connected:
         return _net_response(net)
+
+    if net.client:
+        await net.client.disconnect()
+        net.client = None
 
     client = IRCClient(
         network_name=net.name,
