@@ -19,6 +19,11 @@ mypy lipservice                  # type checking — keep this clean
 - Apache 2.0 license.
 - The user prefers the term "networks" as a mnemonic for IRC servers.
 
+## Git
+
+- Always use `commit` (the shell alias/script), never bare `git commit`,
+  which is booby-trapped by the Cursor front end.
+
 ## Things to remember
 
 - Robustness across server restarts: auto-reconnect with exponential

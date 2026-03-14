@@ -102,6 +102,17 @@ class ProxyState:
         self._msg_counter += 1
         return f"msg_{self._msg_counter:06d}"
 
+    def _inject_meta(self, net: NetworkState, text: str) -> None:
+        msg: dict[str, Any] = {
+            "id": self.next_message_id(),
+            "time": datetime.now(timezone.utc).isoformat(),
+            "from": "",
+            "type": "meta",
+            "text": text,
+        }
+        for ch in net.channels.values():
+            ch.messages.append(msg)
+
     async def handle_irc_event(
         self, network_name: str, event_type: str, data: dict[str, Any],
     ) -> None:
@@ -112,9 +123,12 @@ class ProxyState:
         now: str = datetime.now(timezone.utc).isoformat()
 
         if event_type == "network_state":
+            prev_state = net.state
             net.state = data["state"]
             if data["state"] == "connected":
                 net.reconnect_delay = 1.0
+                if prev_state == "connecting":
+                    self._inject_meta(net, f"Connected to {net.host}")
                 channels_to_rejoin = list(net.channels.keys())
                 if channels_to_rejoin and net.client:
                     for ch_name in channels_to_rejoin:
@@ -123,6 +137,8 @@ class ProxyState:
                         except Exception:
                             pass
             elif data["state"] == "disconnected":
+                if prev_state in ("connected", "connecting"):
+                    self._inject_meta(net, f"Disconnected from {net.host}")
                 for ch in net.channels.values():
                     ch.members.clear()
                 if net.auto_reconnect:
@@ -278,6 +294,9 @@ class ProxyState:
             if not net or not net.auto_reconnect:
                 return
 
+            self._inject_meta(
+                net, f"Reconnecting to {net.host} (attempt after {delay:.0f} s)",
+            )
             client = IRCClient(
                 network_name=net.name,
                 host=net.host,
