@@ -40,6 +40,14 @@ class StorageBackend(ABC):
     ) -> list[dict[str, Any]]: ...
 
     @abstractmethod
+    def list_private_peers(self, network: str) -> list[str]: ...
+
+    @abstractmethod
+    def remove_private_peer(
+        self, network: str, nick: str,
+    ) -> None: ...
+
+    @abstractmethod
     def remove_network(self, network: str) -> None: ...
 
 
@@ -109,6 +117,16 @@ class MemoryBackend(StorageBackend):
         self, network: str, nick: str,
     ) -> list[dict[str, Any]]:
         return list(self._private_deque(network, nick))
+
+    def list_private_peers(self, network: str) -> list[str]:
+        return sorted({
+            nick for net, nick in self._private_msgs if net == network
+        })
+
+    def remove_private_peer(
+        self, network: str, nick: str,
+    ) -> None:
+        self._private_msgs.pop((network, nick), None)
 
     def remove_network(self, network: str) -> None:
         self._meta_msgs.pop(network, None)

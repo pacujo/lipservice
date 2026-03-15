@@ -389,6 +389,15 @@ async def send_channel_message(
     return msg
 
 
+@router.get("/networks/{network}/queries")
+async def list_queries(
+    network: str, _auth: TokenEntry = Depends(require_auth),
+) -> list[dict[str, str]]:
+    _get_network(network)
+    peers = proxy.storage.list_private_peers(network)
+    return [{"nick": p} for p in peers]
+
+
 @router.get("/networks/{network}/messages/{nick}")
 async def list_private_messages(
     network: str,
@@ -400,7 +409,19 @@ async def list_private_messages(
 ) -> dict[str, Any]:
     _get_network(network)
     msgs = proxy.storage.get_private_messages(network, nick)
-    return _paginate_messages(msgs, limit, before, after)
+    meta = proxy.storage.get_meta_messages(network)
+    merged = sorted(msgs + meta, key=lambda m: m["id"])
+    return _paginate_messages(merged, limit, before, after)
+
+
+@router.delete("/networks/{network}/messages/{nick}", status_code=204)
+async def close_query(
+    network: str,
+    nick: str,
+    _auth: TokenEntry = Depends(require_auth),
+) -> None:
+    _get_network(network)
+    proxy.storage.remove_private_peer(network, nick)
 
 
 @router.post("/networks/{network}/messages/{nick}", status_code=201)

@@ -92,6 +92,26 @@ class PostgresBackend(StorageBackend):
             cur.execute(_SELECT_PRIVATE, (network, nick))
             return cur.fetchall()
 
+    def list_private_peers(self, network: str) -> list[str]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT target FROM messages"
+                " WHERE network = %s AND kind = 'private'"
+                " ORDER BY target",
+                (network,),
+            )
+            return [row["target"] for row in cur.fetchall()]
+
+    def remove_private_peer(
+        self, network: str, nick: str,
+    ) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM messages"
+                " WHERE network = %s AND kind = 'private' AND target = %s",
+                (network, nick),
+            )
+
     def remove_network(self, network: str) -> None:
         with self._conn.cursor() as cur:
             cur.execute("DELETE FROM messages WHERE network = %s", (network,))

@@ -279,6 +279,36 @@ GET /networks/:network/channels/:channel/members
 
 ---
 
+### Queries (Private Messages)
+
+Query buffers track private message conversations with individual users.
+They appear spontaneously when someone sends the proxy a private message.
+
+#### List query peers
+
+```
+GET /networks/:network/queries
+```
+
+Returns a list of nicks with whom private message history exists:
+
+```json
+[
+  {"nick": "alice"},
+  {"nick": "bob"}
+]
+```
+
+#### Close a query
+
+```
+DELETE /networks/:network/messages/:nick
+```
+
+Returns `204 No Content`. Removes all stored messages for that peer.
+
+---
+
 ### Messages
 
 Messages cover both channel and private (query) conversations.
