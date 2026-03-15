@@ -68,23 +68,23 @@ def setup(admin_uri: str, role: str, dbname: str) -> None:
             "SELECT 1 FROM pg_roles WHERE rolname = %s", (role,),
         )
         if cur.fetchone():
-            print(f"Role {role!r} already exists.")
+            print(f"Role {role!r} already exists.", file=sys.stderr)
         else:
             conn.execute(sql.SQL(
                 "CREATE ROLE {} LOGIN PASSWORD {}"
             ).format(sql.Identifier(role), sql.Literal(password)))
-            print(f"Created role {role!r}.")
+            print(f"Created role {role!r}.", file=sys.stderr)
 
         cur = conn.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,),
         )
         if cur.fetchone():
-            print(f"Database {dbname!r} already exists.")
+            print(f"Database {dbname!r} already exists.", file=sys.stderr)
         else:
             conn.execute(sql.SQL(
                 "CREATE DATABASE {} OWNER {}"
             ).format(sql.Identifier(dbname), sql.Identifier(role)))
-            print(f"Created database {dbname!r}.")
+            print(f"Created database {dbname!r}.", file=sys.stderr)
     finally:
         conn.close()
 
@@ -92,11 +92,11 @@ def setup(admin_uri: str, role: str, dbname: str) -> None:
     app_conn = psycopg.connect(app_conn_uri, autocommit=True)
     try:
         app_conn.execute(_SCHEMA)
-        print("Schema applied.")
+        print("Schema applied.", file=sys.stderr)
     finally:
         app_conn.close()
 
-    print(f"\nSet LIPSERVICE_DATABASE_URI={app_conn_uri}")
+    print(app_conn_uri)
 
 
 def teardown(admin_uri: str, role: str, dbname: str) -> None:
@@ -109,9 +109,9 @@ def teardown(admin_uri: str, role: str, dbname: str) -> None:
             conn.execute(sql.SQL(
                 "DROP DATABASE {} WITH (FORCE)"
             ).format(sql.Identifier(dbname)))
-            print(f"Dropped database {dbname!r}.")
+            print(f"Dropped database {dbname!r}.", file=sys.stderr)
         else:
-            print(f"Database {dbname!r} does not exist.")
+            print(f"Database {dbname!r} does not exist.", file=sys.stderr)
 
         cur = conn.execute(
             "SELECT 1 FROM pg_roles WHERE rolname = %s", (role,),
@@ -120,9 +120,9 @@ def teardown(admin_uri: str, role: str, dbname: str) -> None:
             conn.execute(sql.SQL(
                 "DROP ROLE {}"
             ).format(sql.Identifier(role)))
-            print(f"Dropped role {role!r}.")
+            print(f"Dropped role {role!r}.", file=sys.stderr)
         else:
-            print(f"Role {role!r} does not exist.")
+            print(f"Role {role!r} does not exist.", file=sys.stderr)
     finally:
         conn.close()
 
