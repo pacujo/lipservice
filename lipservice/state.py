@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -11,6 +10,7 @@ import logging
 
 if TYPE_CHECKING:
     from lipservice.irc import IRCClient
+    from lipservice.storage import StorageBackend
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -26,19 +26,15 @@ class MemberInfo:
 
 
 class ChannelState:
-    __slots__ = (
-        "name", "topic", "topic_set_by", "members", "messages", "joined",
-    )
+    __slots__ = ("name", "topic", "topic_set_by", "members", "joined")
 
     def __init__(
         self, name: str, *, topic: str = "", topic_set_by: str = "",
-        max_backlog: int = 1000,
     ) -> None:
         self.name = name
         self.topic = topic
         self.topic_set_by = topic_set_by
         self.members: dict[str, MemberInfo] = {}
-        self.messages: deque[dict[str, Any]] = deque(maxlen=max_backlog)
         self.joined: bool = True
 
 
@@ -53,10 +49,6 @@ class NetworkState:
     nickserv_password: str | None = None
     state: str = "disconnected"
     channels: dict[str, ChannelState] = field(default_factory=dict)
-    private_messages: dict[str, deque[dict[str, Any]]] = field(default_factory=dict)
-    meta_messages: deque[dict[str, Any]] = field(
-        default_factory=lambda: deque(maxlen=1000),
-    )
     irc_user: str = ""
     irc_host: str = ""
     modes: str = ""
@@ -98,26 +90,21 @@ class EventBus:
 
 
 class ProxyState:
-    def __init__(self, max_backlog: int = 1000) -> None:
+    def __init__(self, storage: StorageBackend) -> None:
         self.networks: dict[str, NetworkState] = {}
         self.event_bus: EventBus = EventBus()
         self.start_time: float = time.time()
-        self.max_backlog: int = max_backlog
-        self._msg_counter: int = 0
-
-    def next_message_id(self) -> str:
-        self._msg_counter += 1
-        return f"msg_{self._msg_counter:012d}"
+        self.storage: StorageBackend = storage
 
     def _inject_meta(self, net: NetworkState, text: str) -> None:
         msg: dict[str, Any] = {
-            "id": self.next_message_id(),
+            "id": self.storage.next_message_id(),
             "time": datetime.now(timezone.utc).isoformat(),
             "from": "",
             "type": "meta",
             "text": text,
         }
-        net.meta_messages.append(msg)
+        self.storage.append_meta_message(net.name, msg)
 
     async def handle_irc_event(
         self, network_name: str, event_type: str, data: dict[str, Any],
@@ -165,7 +152,7 @@ class ProxyState:
             })
 
         elif event_type == "message":
-            msg_id = self.next_message_id()
+            msg_id = self.storage.next_message_id()
             msg: dict[str, Any] = {
                 "id": msg_id,
                 "time": now,
@@ -176,18 +163,18 @@ class ProxyState:
             if "channel" in data:
                 channel: str = data["channel"]
                 if channel not in net.channels:
-                    net.channels[channel] = ChannelState(
-                        name=channel, max_backlog=self.max_backlog,
-                    )
-                net.channels[channel].messages.append(msg)
+                    net.channels[channel] = ChannelState(name=channel)
+                self.storage.append_channel_message(
+                    network_name, channel, msg,
+                )
                 await self.event_bus.publish("message", {
                     "network": network_name, "channel": channel, **msg,
                 })
             else:
                 nick: str = data.get("nick", data["from"])
-                if nick not in net.private_messages:
-                    net.private_messages[nick] = deque(maxlen=self.max_backlog)
-                net.private_messages[nick].append(msg)
+                self.storage.append_private_message(
+                    network_name, nick, msg,
+                )
                 await self.event_bus.publish("message", {
                     "network": network_name, "nick": nick, **msg,
                 })
@@ -195,9 +182,7 @@ class ProxyState:
         elif event_type == "join":
             channel = data["channel"]
             if channel not in net.channels:
-                net.channels[channel] = ChannelState(
-                    name=channel, max_backlog=self.max_backlog,
-                )
+                net.channels[channel] = ChannelState(name=channel)
             if data["nick"] == net.nick:
                 net.channels[channel].joined = True
             net.channels[channel].members[data["nick"]] = MemberInfo(
@@ -266,9 +251,7 @@ class ProxyState:
         elif event_type == "_names":
             channel = data["channel"]
             if channel not in net.channels:
-                net.channels[channel] = ChannelState(
-                    name=channel, max_backlog=self.max_backlog,
-                )
+                net.channels[channel] = ChannelState(name=channel)
             net.channels[channel].members[data["nick"]] = MemberInfo(
                 nick=data["nick"], prefix=data.get("prefix", ""),
             )

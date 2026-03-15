@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections import deque
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
@@ -25,9 +24,12 @@ from lipservice.models import (
     TopicUpdate,
 )
 from lipservice.state import ChannelState, NetworkState, ProxyState
+from lipservice.storage import MemoryBackend
 
 router: APIRouter = APIRouter()
-proxy: ProxyState = ProxyState(max_backlog=settings.max_backlog)
+proxy: ProxyState = ProxyState(
+    storage=MemoryBackend(max_backlog=settings.max_backlog),
+)
 
 
 def _net_response(net: NetworkState) -> dict[str, Any]:
@@ -149,6 +151,7 @@ async def delete_network(
     if net.client:
         await net.client.disconnect()
     del proxy.networks[name]
+    proxy.storage.remove_network(name)
 
 
 @router.post("/networks/{name}/connect")
@@ -328,10 +331,9 @@ async def list_channel_messages(
             "error": "not_found",
             "message": f'Channel "{channel}" not found.',
         })
-    merged = sorted(
-        list(ch.messages) + list(net.meta_messages),
-        key=lambda m: m["id"],
-    )
+    ch_msgs = proxy.storage.get_channel_messages(network, channel)
+    meta = proxy.storage.get_meta_messages(network)
+    merged = sorted(ch_msgs + meta, key=lambda m: m["id"])
     return _paginate_messages(merged, limit, before, after)
 
 
@@ -351,16 +353,14 @@ async def send_channel_message(
         await client.privmsg(channel, body.text)
 
     now: str = datetime.now(timezone.utc).isoformat()
-    msg_id: str = proxy.next_message_id()
+    msg_id: str = proxy.storage.next_message_id()
     msg: dict[str, Any] = {
         "id": msg_id, "time": now, "from": net.nick, "type": body.type, "text": body.text,
     }
 
     if channel not in net.channels:
-        net.channels[channel] = ChannelState(
-            name=channel, max_backlog=proxy.max_backlog,
-        )
-    net.channels[channel].messages.append(msg)
+        net.channels[channel] = ChannelState(name=channel)
+    proxy.storage.append_channel_message(network, channel, msg)
 
     return msg
 
@@ -374,8 +374,8 @@ async def list_private_messages(
     after: str | None = Query(None),
     _auth: TokenEntry = Depends(require_auth),
 ) -> dict[str, Any]:
-    net = _get_network(network)
-    msgs = net.private_messages.get(nick, deque())
+    _get_network(network)
+    msgs = proxy.storage.get_private_messages(network, nick)
     return _paginate_messages(msgs, limit, before, after)
 
 
@@ -395,20 +395,18 @@ async def send_private_message(
         await client.privmsg(nick, body.text)
 
     now: str = datetime.now(timezone.utc).isoformat()
-    msg_id: str = proxy.next_message_id()
+    msg_id: str = proxy.storage.next_message_id()
     msg: dict[str, Any] = {
         "id": msg_id, "time": now, "from": net.nick, "type": body.type, "text": body.text,
     }
 
-    if nick not in net.private_messages:
-        net.private_messages[nick] = deque(maxlen=proxy.max_backlog)
-    net.private_messages[nick].append(msg)
+    proxy.storage.append_private_message(network, nick, msg)
 
     return msg
 
 
 def _paginate_messages(
-    buf: deque[dict[str, Any]] | list[dict[str, Any]], limit: int,
+    buf: list[dict[str, Any]], limit: int,
     before: str | None, after: str | None,
 ) -> dict[str, Any]:
     msgs: list[dict[str, Any]] = list(buf)
