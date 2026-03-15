@@ -26,7 +26,9 @@ class MemberInfo:
 
 
 class ChannelState:
-    __slots__ = ("name", "topic", "topic_set_by", "members", "messages")
+    __slots__ = (
+        "name", "topic", "topic_set_by", "members", "messages", "joined",
+    )
 
     def __init__(
         self, name: str, *, topic: str = "", topic_set_by: str = "",
@@ -37,6 +39,7 @@ class ChannelState:
         self.topic_set_by = topic_set_by
         self.members: dict[str, MemberInfo] = {}
         self.messages: deque[dict[str, Any]] = deque(maxlen=max_backlog)
+        self.joined: bool = True
 
 
 @dataclass
@@ -140,7 +143,9 @@ class ProxyState:
                     except Exception:
                         log.warning("NickServ IDENTIFY failed for %s",
                                     network_name)
-                channels_to_rejoin = list(net.channels.keys())
+                channels_to_rejoin = [
+                    name for name, ch in net.channels.items() if ch.joined
+                ]
                 if channels_to_rejoin and net.client:
                     for ch_name in channels_to_rejoin:
                         try:
@@ -193,6 +198,8 @@ class ProxyState:
                 net.channels[channel] = ChannelState(
                     name=channel, max_backlog=self.max_backlog,
                 )
+            if data["nick"] == net.nick:
+                net.channels[channel].joined = True
             net.channels[channel].members[data["nick"]] = MemberInfo(
                 nick=data["nick"],
                 user=data.get("user", ""),
@@ -209,9 +216,11 @@ class ProxyState:
             if data.get("nick") == net.nick:
                 self._inject_meta(net, f"Left {channel}")
             if channel in net.channels:
-                net.channels[channel].members.pop(data["nick"], None)
+                ch = net.channels[channel]
+                ch.members.pop(data["nick"], None)
                 if data["nick"] == net.nick:
-                    del net.channels[channel]
+                    ch.joined = False
+                    ch.members.clear()
             await self.event_bus.publish("part", {
                 "network": network_name, **data,
             })

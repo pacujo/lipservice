@@ -38,7 +38,7 @@ def _net_response(net: NetworkState) -> dict[str, Any]:
         "tls": net.tls,
         "nick": net.nick,
         "state": net.state,
-        "channels": list(net.channels.keys()),
+        "channels": [n for n, ch in net.channels.items() if ch.joined],
     }
 
 
@@ -214,7 +214,7 @@ async def list_channels(
         result.append({
             "name": ch.name,
             "topic": ch.topic,
-            "joined": True,
+            "joined": ch.joined,
             "members_count": len(ch.members),
             "unread_count": 0,
         })
@@ -236,7 +236,7 @@ async def get_channel(
         "name": ch.name,
         "topic": ch.topic,
         "topic_set_by": ch.topic_set_by,
-        "joined": True,
+        "joined": ch.joined,
         "members_count": len(ch.members),
         "unread_count": 0,
     }
@@ -247,7 +247,8 @@ async def join_channel(
     network: str, body: ChannelJoin, _auth: TokenEntry = Depends(require_auth),
 ) -> dict[str, Any]:
     net, client = _get_connected_network(network)
-    if body.name in net.channels:
+    ch_existing = net.channels.get(body.name)
+    if ch_existing and ch_existing.joined:
         raise HTTPException(409, detail={
             "error": "conflict",
             "message": f'Already joined "{body.name}".',
