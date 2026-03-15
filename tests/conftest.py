@@ -48,11 +48,11 @@ def mock_network():
     ch.members["testbot"] = MemberInfo(nick="testbot", prefix="@")
     ch.members["alice"] = MemberInfo(nick="alice", user="alice", host="user/alice")
     ch.messages.append({
-        "id": "msg_000001", "time": "2026-03-14T10:00:00Z",
+        "id": "msg_000000000001", "time": "2026-03-14T10:00:00Z",
         "from": "alice", "type": "privmsg", "text": "hello",
     })
     ch.messages.append({
-        "id": "msg_000002", "time": "2026-03-14T10:01:00Z",
+        "id": "msg_000000000002", "time": "2026-03-14T10:01:00Z",
         "from": "testbot", "type": "privmsg", "text": "hi alice",
     })
     net.channels["#test"] = ch

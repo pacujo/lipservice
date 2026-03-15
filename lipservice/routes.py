@@ -326,7 +326,11 @@ async def list_channel_messages(
             "error": "not_found",
             "message": f'Channel "{channel}" not found.',
         })
-    return _paginate_messages(ch.messages, limit, before, after)
+    merged = sorted(
+        list(ch.messages) + list(net.meta_messages),
+        key=lambda m: m["id"],
+    )
+    return _paginate_messages(merged, limit, before, after)
 
 
 @router.post("/networks/{network}/channels/{channel}/messages", status_code=201)
@@ -402,7 +406,7 @@ async def send_private_message(
 
 
 def _paginate_messages(
-    buf: deque[dict[str, Any]], limit: int,
+    buf: deque[dict[str, Any]] | list[dict[str, Any]], limit: int,
     before: str | None, after: str | None,
 ) -> dict[str, Any]:
     msgs: list[dict[str, Any]] = list(buf)

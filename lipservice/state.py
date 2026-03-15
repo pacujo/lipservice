@@ -50,6 +50,9 @@ class NetworkState:
     state: str = "disconnected"
     channels: dict[str, ChannelState] = field(default_factory=dict)
     private_messages: dict[str, deque[dict[str, Any]]] = field(default_factory=dict)
+    meta_messages: deque[dict[str, Any]] = field(
+        default_factory=lambda: deque(maxlen=1000),
+    )
     irc_user: str = ""
     irc_host: str = ""
     modes: str = ""
@@ -100,7 +103,7 @@ class ProxyState:
 
     def next_message_id(self) -> str:
         self._msg_counter += 1
-        return f"msg_{self._msg_counter:06d}"
+        return f"msg_{self._msg_counter:012d}"
 
     def _inject_meta(self, net: NetworkState, text: str) -> None:
         msg: dict[str, Any] = {
@@ -110,8 +113,7 @@ class ProxyState:
             "type": "meta",
             "text": text,
         }
-        for ch in net.channels.values():
-            ch.messages.append(msg)
+        net.meta_messages.append(msg)
 
     async def handle_irc_event(
         self, network_name: str, event_type: str, data: dict[str, Any],
