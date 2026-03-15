@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock
 
@@ -16,6 +18,7 @@ def _reset_state():
     proxy.storage = MemoryBackend(max_backlog=1000)
     proxy.event_bus._counter = 0
     proxy.event_bus._subscribers.clear()
+    proxy._join_waiters.clear()
     token_store._tokens.clear()
 
 
@@ -37,6 +40,13 @@ def mock_network():
     """A connected network with a mocked IRC client, one channel, and some messages."""
     mock_client = AsyncMock()
     mock_client.connected = True
+
+    async def _fake_join(channel: str, key: str | None = None) -> None:
+        await proxy.handle_irc_event("testnet", "join", {
+            "channel": channel, "nick": "testbot", "user": "", "host": "",
+        })
+
+    mock_client.join.side_effect = _fake_join
 
     net = NetworkState(
         name="testnet", host="irc.example.com", port=6697,

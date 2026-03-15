@@ -269,13 +269,25 @@ async def join_channel(
             "error": "conflict",
             "message": f'Already joined "{body.name}".',
         })
+    fut = proxy.expect_join(network, body.name)
     await client.join(body.name, body.key)
-    await asyncio.sleep(0.5)
+    try:
+        await asyncio.wait_for(fut, timeout=5.0)
+    except TimeoutError:
+        raise HTTPException(504, detail={
+            "error": "timeout",
+            "message": f'Server did not confirm join for "{body.name}".',
+        })
+    except RuntimeError as exc:
+        raise HTTPException(502, detail={
+            "error": "join_rejected",
+            "message": str(exc),
+        })
     ch = net.channels.get(body.name)
     return {
         "name": body.name,
         "topic": ch.topic if ch else "",
-        "joined": True,
+        "joined": ch.joined if ch else False,
         "members_count": len(ch.members) if ch else 0,
         "unread_count": 0,
     }

@@ -239,6 +239,13 @@ class IRCClient:
             "NICK": self._on_nick,
             "353": self._on_names,
             "MODE": self._on_mode,
+            "403": self._on_join_error,
+            "405": self._on_join_error,
+            "471": self._on_join_error,
+            "473": self._on_join_error,
+            "474": self._on_join_error,
+            "475": self._on_join_error,
+            "476": self._on_join_error,
         }.get(msg.command)
 
         if handler:
@@ -370,4 +377,11 @@ class IRCClient:
         params: list[str] = msg.params[2:]
         await self.on_event(self.network_name, "mode", {
             "target": target, "modes": modes, "params": params,
+        })
+
+    async def _on_join_error(self, msg: IRCMessage) -> None:
+        channel: str = msg.params[1] if len(msg.params) > 1 else ""
+        reason: str = msg.params[-1] if msg.params else "Cannot join channel"
+        await self.on_event(self.network_name, "join_error", {
+            "channel": channel, "code": msg.command, "reason": reason,
         })

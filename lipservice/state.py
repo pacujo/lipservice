@@ -95,6 +95,28 @@ class ProxyState:
         self.event_bus: EventBus = EventBus()
         self.start_time: float = time.time()
         self.storage: StorageBackend = storage
+        self._join_waiters: dict[
+            tuple[str, str], asyncio.Future[None]
+        ] = {}
+
+    def expect_join(
+        self, network: str, channel: str,
+    ) -> asyncio.Future[None]:
+        key = (network, channel)
+        fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._join_waiters[key] = fut
+        return fut
+
+    def _resolve_join(
+        self, network: str, channel: str, error: str | None = None,
+    ) -> None:
+        key = (network, channel)
+        fut = self._join_waiters.pop(key, None)
+        if fut and not fut.done():
+            if error:
+                fut.set_exception(RuntimeError(error))
+            else:
+                fut.set_result(None)
 
     def _inject_meta(self, net: NetworkState, text: str) -> None:
         msg: dict[str, Any] = {
@@ -192,9 +214,16 @@ class ProxyState:
             )
             if data["nick"] == net.nick:
                 self._inject_meta(net, f"Joined {channel}")
+                self._resolve_join(network_name, channel)
             await self.event_bus.publish("join", {
                 "network": network_name, **data,
             })
+
+        elif event_type == "join_error":
+            channel = data["channel"]
+            self._resolve_join(
+                network_name, channel, data.get("reason", "Cannot join"),
+            )
 
         elif event_type == "part":
             channel = data["channel"]
