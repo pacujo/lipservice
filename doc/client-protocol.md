@@ -522,16 +522,9 @@ Without filters, all events for all networks are delivered.
 
 ### Reconnection
 
-The stream includes an `id:` field on each event. If the connection drops, the
-client reconnects with `Last-Event-ID` to resume without gaps:
-
-```
-GET /events
-Last-Event-ID: evt_00042
-```
-
-The proxy replays any events the client missed since that ID, then continues
-with live events.
+If the SSE connection drops, the client reconnects and uses the REST API
+to catch up (e.g. `GET /networks/:net/channels/:chan/messages?after=<last_id>`).
+No server-side event replay is needed.
 
 ## Read State
 
