@@ -189,12 +189,16 @@ class ProxyState:
                 user=data.get("user", ""),
                 host=data.get("host", ""),
             )
+            if data["nick"] == net.nick:
+                self._inject_meta(net, f"Joined {channel}")
             await self.event_bus.publish("join", {
                 "network": network_name, **data,
             })
 
         elif event_type == "part":
             channel = data["channel"]
+            if data.get("nick") == net.nick:
+                self._inject_meta(net, f"Left {channel}")
             if channel in net.channels:
                 net.channels[channel].members.pop(data["nick"], None)
                 if data["nick"] == net.nick:
