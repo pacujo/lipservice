@@ -335,3 +335,10 @@ class ProxyState:
         if net.reconnect_task and not net.reconnect_task.done():
             net.reconnect_task.cancel()
             net.reconnect_task = None
+
+    async def shutdown(self) -> None:
+        for net in self.networks.values():
+            self.cancel_reconnect(net)
+            if net.client:
+                await net.client.disconnect()
+                net.client = None
