@@ -129,18 +129,20 @@ Content-Type: application/json
   "port": 6697,
   "tls": true,
   "nick": "alice",
-  "server_password": null
+  "server_password": null,
+  "nickserv_password": null
 }
 ```
 
-| Field             | Type    | Required | Default |
-|-------------------|---------|----------|---------|
-| `name`            | string  | yes      |         |
-| `host`            | string  | yes      |         |
-| `port`            | integer | no       | 6697    |
-| `tls`             | boolean | no       | true    |
-| `nick`            | string  | yes      |         |
-| `server_password` | string  | no       | null    |
+| Field              | Type    | Required | Default |
+|--------------------|---------|----------|---------|
+| `name`             | string  | yes      |         |
+| `host`             | string  | yes      |         |
+| `port`             | integer | no       | 6697    |
+| `tls`              | boolean | no       | true    |
+| `nick`             | string  | yes      |         |
+| `server_password`  | string  | no       | null    |
+| `nickserv_password` | string  | no       | null    |
 
 Returns `201 Created` with the network object, or `409 Conflict` if the name
 is taken.

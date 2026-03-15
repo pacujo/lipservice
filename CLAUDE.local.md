@@ -27,8 +27,8 @@ mypy lipservice                  # type checking — keep this clean
 ## Things to remember
 
 - Robustness across server restarts: auto-reconnect with exponential
-  backoff (1 s → 5 min cap) is implemented; channels are rejoined
-  automatically after reconnect.
+  backoff (1 s → 5 min cap) is implemented; NickServ IDENTIFY is sent
+  (if configured) and channels are rejoined automatically after reconnect.
 - Connection liveness is probed with PING every 60 s; dead after 120 s
   of silence.
 - "Infinite memory": message backlog is bounded by LIPSERVICE_MAX_BACKLOG

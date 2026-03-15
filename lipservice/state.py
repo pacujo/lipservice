@@ -47,6 +47,7 @@ class NetworkState:
     tls: bool
     nick: str
     server_password: str | None = None
+    nickserv_password: str | None = None
     state: str = "disconnected"
     channels: dict[str, ChannelState] = field(default_factory=dict)
     private_messages: dict[str, deque[dict[str, Any]]] = field(default_factory=dict)
@@ -131,6 +132,14 @@ class ProxyState:
                 net.reconnect_delay = 1.0
                 if prev_state == "connecting":
                     self._inject_meta(net, f"Connected to {net.host}")
+                if net.nickserv_password and net.client:
+                    try:
+                        await net.client.privmsg(
+                            "NickServ", f"IDENTIFY {net.nickserv_password}",
+                        )
+                    except Exception:
+                        log.warning("NickServ IDENTIFY failed for %s",
+                                    network_name)
                 channels_to_rejoin = list(net.channels.keys())
                 if channels_to_rejoin and net.client:
                     for ch_name in channels_to_rejoin:

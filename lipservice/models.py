@@ -20,6 +20,7 @@ class NetworkCreate(BaseModel):
     tls: bool = True
     nick: str
     server_password: str | None = None
+    nickserv_password: str | None = None
 
 
 class NetworkUpdate(BaseModel):
@@ -28,6 +29,7 @@ class NetworkUpdate(BaseModel):
     tls: bool | None = None
     nick: str | None = None
     server_password: str | None = None
+    nickserv_password: str | None = None
 
 
 class NetworkResponse(BaseModel):

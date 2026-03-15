@@ -113,6 +113,7 @@ async def create_network(
         tls=body.tls,
         nick=body.nick,
         server_password=body.server_password,
+        nickserv_password=body.nickserv_password,
     )
     proxy.networks[body.name] = net
     return _net_response(net)
