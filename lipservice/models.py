@@ -52,7 +52,6 @@ class ChannelResponse(BaseModel):
     topic: str
     joined: bool
     members_count: int
-    unread_count: int
 
 
 class TopicUpdate(BaseModel):

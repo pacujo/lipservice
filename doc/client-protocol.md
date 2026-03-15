@@ -198,8 +198,7 @@ GET /networks/:network/channels
     "name": "#dev",
     "topic": "Development discussion",
     "joined": true,
-    "members_count": 42,
-    "unread_count": 7
+    "members_count": 42
   }
 ]
 ```
@@ -525,29 +524,6 @@ Without filters, all events for all networks are delivered.
 If the SSE connection drops, the client reconnects and uses the REST API
 to catch up (e.g. `GET /networks/:net/channels/:chan/messages?after=<last_id>`).
 No server-side event replay is needed.
-
-## Read State
-
-The proxy tracks which messages have been seen per buffer (channel or query).
-
-#### Mark as read
-
-```
-PUT /networks/:network/channels/:channel/read
-Content-Type: application/json
-
-{
-  "last_read_id": "msg_002"
-}
-```
-
-Returns `204 No Content`. Private message buffers use the same pattern:
-
-```
-PUT /networks/:network/messages/:nick/read
-```
-
-The `unread_count` field on channel/query listings reflects this state.
 
 ## Error Format
 

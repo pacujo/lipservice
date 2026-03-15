@@ -232,7 +232,6 @@ async def list_channels(
             "topic": ch.topic,
             "joined": ch.joined,
             "members_count": len(ch.members),
-            "unread_count": 0,
         })
     return result
 
@@ -254,7 +253,6 @@ async def get_channel(
         "topic_set_by": ch.topic_set_by,
         "joined": ch.joined,
         "members_count": len(ch.members),
-        "unread_count": 0,
     }
 
 
@@ -289,7 +287,6 @@ async def join_channel(
         "topic": ch.topic if ch else "",
         "joined": ch.joined if ch else False,
         "members_count": len(ch.members) if ch else 0,
-        "unread_count": 0,
     }
 
 
@@ -315,7 +312,6 @@ async def set_topic(
         "topic": ch.topic if ch else body.text,
         "joined": True,
         "members_count": len(ch.members) if ch else 0,
-        "unread_count": 0,
     }
 
 
