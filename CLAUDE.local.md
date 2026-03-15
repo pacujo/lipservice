@@ -1,7 +1,8 @@
 ## Project overview
 
 Lipservice is an IRC bouncer with a RESTful HTTP + SSE client protocol.
-Python, FastAPI, asyncio. No database yet — all state is in-memory.
+Python, FastAPI, asyncio. Pluggable storage backend: in-memory (default)
+or PostgreSQL (via LIPSERVICE_DATABASE_URI).
 
 ## Build & test
 
@@ -31,7 +32,8 @@ mypy lipservice                  # type checking — keep this clean
   (if configured) and channels are rejoined automatically after reconnect.
 - Connection liveness is probed with PING every 60 s; dead after 120 s
   of silence.
-- "Infinite memory": message backlog is bounded by LIPSERVICE_MAX_BACKLOG
-  (default 1000 per channel/query). There is no persistent storage yet.
+- Storage backends: MemoryBackend (bounded deques, LIPSERVICE_MAX_BACKLOG)
+  and PostgresBackend (psycopg 3, `python -m lipservice.pg_admin` for
+  setup/teardown). Backend is chosen at startup via LIPSERVICE_DATABASE_URI.
 - Explicit disconnect (POST /disconnect) cancels auto-reconnect;
   connection drops do not.

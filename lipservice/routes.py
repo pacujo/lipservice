@@ -24,12 +24,25 @@ from lipservice.models import (
     TopicUpdate,
 )
 from lipservice.state import ChannelState, NetworkState, ProxyState
-from lipservice.storage import MemoryBackend
+from lipservice.storage import MemoryBackend, StorageBackend
+
+
+def _make_storage() -> StorageBackend:
+    backend = settings.storage_backend
+    if backend == "postgres":
+        from lipservice.pg_backend import PostgresBackend
+        if not settings.database_uri:
+            raise RuntimeError(
+                "LIPSERVICE_STORAGE=postgres requires LIPSERVICE_DATABASE_URI",
+            )
+        return PostgresBackend(settings.database_uri)
+    if backend == "memory":
+        return MemoryBackend(max_backlog=settings.max_backlog)
+    raise RuntimeError(f"Unknown storage backend: {backend!r}")
+
 
 router: APIRouter = APIRouter()
-proxy: ProxyState = ProxyState(
-    storage=MemoryBackend(max_backlog=settings.max_backlog),
-)
+proxy: ProxyState = ProxyState(storage=_make_storage())
 
 
 def _net_response(net: NetworkState) -> dict[str, Any]:

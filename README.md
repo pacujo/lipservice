@@ -24,7 +24,59 @@ All settings are read from environment variables:
 | `LIPSERVICE_USER` | `admin` | Proxy account username |
 | `LIPSERVICE_PASS` | `changeme` | Proxy account password |
 | `LIPSERVICE_TOKEN_LIFETIME` | `86400` | Auth token lifetime in seconds |
-| `LIPSERVICE_MAX_BACKLOG` | `1000` | Max messages kept per channel/query |
+| `LIPSERVICE_STORAGE` | `memory` | Storage backend: `memory` or `postgres` |
+| `LIPSERVICE_MAX_BACKLOG` | `1000` | Max messages per channel/query (`memory`) |
+| `LIPSERVICE_DATABASE_URI` | _(empty)_ | PostgreSQL connection URI (`postgres`) |
+
+## PostgreSQL Backend
+
+By default lipservice stores messages in memory (lost on restart). For
+persistent storage, use the PostgreSQL backend.
+
+The `pg_admin` tool bootstraps (or tears down) the database:
+
+- `--admin-uri` — an *existing* PostgreSQL connection with `CREATEROLE`
+  and `CREATEDB` privileges (e.g. the default `postgres` user, or a
+  managed-service admin like Aiven's `avnadmin`).
+- `--role` — the application role to create (default: `lipservice`).
+- `--dbname` — database name (default: same as `--role`).
+
+The tool creates the role (with a generated password) and database via
+the admin connection, then connects as the new role to apply the schema.
+It prints the resulting connection URI to use with lipservice.
+
+### Setup
+
+```bash
+python -m lipservice.pg_admin setup \
+    --admin-uri postgres://postgres@localhost
+```
+
+This creates:
+
+1. A PostgreSQL role `lipservice` with a random password
+2. A database `lipservice` owned by that role
+3. The `messages` table, indexes, and ID sequence inside it
+
+The tool prints the connection URI at the end — copy it into your
+environment.
+
+### Running with PostgreSQL
+
+```bash
+export LIPSERVICE_STORAGE=postgres
+export LIPSERVICE_DATABASE_URI=<URI printed by setup>
+python -m lipservice
+```
+
+### Teardown
+
+```bash
+python -m lipservice.pg_admin teardown \
+    --admin-uri postgres://postgres@localhost
+```
+
+This drops the database and the role.
 
 ## Usage
 
@@ -180,8 +232,11 @@ lipservice/
 │   ├── config.py             Environment-based settings
 │   ├── irc.py                Async IRC client
 │   ├── models.py             Pydantic request/response models
+│   ├── pg_admin.py           PostgreSQL setup/teardown CLI
+│   ├── pg_backend.py         PostgreSQL storage backend
 │   ├── routes.py             REST API routes
-│   └── state.py              In-memory state and event bus
+│   ├── state.py              Runtime state and event bus
+│   └── storage.py            Storage backend interface + memory backend
 ├── tests/
 │   ├── conftest.py            Shared fixtures
 │   ├── test_api.py            API unit tests
