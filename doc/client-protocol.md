@@ -13,6 +13,7 @@ graph LR
     Client -->|REST API<br/>HTTP| Proxy[Lipservice<br/>Proxy]
     Proxy -->|SSE| Client
     Proxy <-->|raw IRC| Server[IRC Server]
+    Proxy --- Storage[(Storage<br/>Memory / PostgreSQL)]
 ```
 
 ### Design Goals
