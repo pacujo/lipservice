@@ -386,6 +386,9 @@ async def send_channel_message(
     if channel not in net.channels:
         net.channels[channel] = ChannelState(name=channel)
     proxy.storage.append_channel_message(network, channel, msg)
+    await proxy.event_bus.publish("message", {
+        "network": network, "channel": channel, **msg,
+    })
 
     return msg
 
@@ -426,6 +429,9 @@ async def send_private_message(
     }
 
     proxy.storage.append_private_message(network, nick, msg)
+    await proxy.event_bus.publish("message", {
+        "network": network, "nick": nick, **msg,
+    })
 
     return msg
 
