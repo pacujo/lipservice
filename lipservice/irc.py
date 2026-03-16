@@ -238,6 +238,7 @@ class IRCClient:
             "332": self._on_topic_rpl,
             "NICK": self._on_nick,
             "353": self._on_names,
+            "366": self._on_names_end,
             "MODE": self._on_mode,
             "403": self._on_join_error,
             "405": self._on_join_error,
@@ -387,6 +388,12 @@ class IRCClient:
             await self.on_event(self.network_name, "_names", {
                 "channel": channel, "nick": name, "prefix": prefix,
             })
+
+    async def _on_names_end(self, msg: IRCMessage) -> None:
+        channel: str = msg.params[1] if len(msg.params) > 1 else ""
+        await self.on_event(self.network_name, "_names_end", {
+            "channel": channel,
+        })
 
     async def _on_mode(self, msg: IRCMessage) -> None:
         target: str = msg.params[0] if msg.params else ""

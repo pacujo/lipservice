@@ -128,6 +128,21 @@ class ProxyState:
         }
         self.storage.append_meta_message(net.name, msg)
 
+    async def _inject_channel_meta(
+        self, network_name: str, channel: str, text: str,
+    ) -> None:
+        msg: Message = {
+            "id": self.storage.next_message_id(),
+            "time": datetime.now(timezone.utc).isoformat(),
+            "from": "",
+            "type": "meta",
+            "text": text,
+        }
+        self.storage.append_channel_message(network_name, channel, msg)
+        await self.event_bus.publish("message", {
+            "network": network_name, "channel": channel, **msg,
+        })
+
     async def handle_irc_event(
         self, network_name: str, event_type: str, data: dict[str, Any],
     ) -> None:
@@ -215,6 +230,10 @@ class ProxyState:
             if data["nick"] == net.nick:
                 self._inject_meta(net, f"Joined {channel}")
                 self._resolve_join(network_name, channel)
+            await self._inject_channel_meta(
+                network_name, channel,
+                f"{data['nick']} has joined",
+            )
             await self.event_bus.publish("join", {
                 "network": network_name, **data,
             })
@@ -229,6 +248,12 @@ class ProxyState:
             channel = data["channel"]
             if data.get("nick") == net.nick:
                 self._inject_meta(net, f"Left {channel}")
+            part_text = f"{data['nick']} has left"
+            if data.get("message"):
+                part_text += f" ({data['message']})"
+            await self._inject_channel_meta(
+                network_name, channel, part_text,
+            )
             if channel in net.channels:
                 ch = net.channels[channel]
                 ch.members.pop(data["nick"], None)
@@ -240,14 +265,27 @@ class ProxyState:
             })
 
         elif event_type == "quit":
+            quit_text = f"{data['nick']} has quit"
+            if data.get("message"):
+                quit_text += f" ({data['message']})"
             for ch in net.channels.values():
-                ch.members.pop(data["nick"], None)
+                if data["nick"] in ch.members:
+                    ch.members.pop(data["nick"])
+                    await self._inject_channel_meta(
+                        network_name, ch.name, quit_text,
+                    )
             await self.event_bus.publish("quit", {
                 "network": network_name, **data,
             })
 
         elif event_type == "kick":
             channel = data["channel"]
+            kick_text = f"{data['nick']} was kicked by {data.get('by', '?')}"
+            if data.get("message"):
+                kick_text += f" ({data['message']})"
+            await self._inject_channel_meta(
+                network_name, channel, kick_text,
+            )
             if channel in net.channels:
                 net.channels[channel].members.pop(data["nick"], None)
                 if data["nick"] == net.nick:
@@ -284,6 +322,18 @@ class ProxyState:
             net.channels[channel].members[data["nick"]] = MemberInfo(
                 nick=data["nick"], prefix=data.get("prefix", ""),
             )
+
+        elif event_type == "_names_end":
+            channel = data["channel"]
+            if channel in net.channels:
+                members = net.channels[channel].members
+                nicks = sorted(
+                    (m.prefix or "") + m.nick for m in members.values()
+                )
+                await self._inject_channel_meta(
+                    network_name, channel,
+                    f"Users ({len(nicks)}): {', '.join(nicks)}",
+                )
 
         elif event_type == "mode":
             await self.event_bus.publish("mode", {
@@ -377,6 +427,7 @@ class ProxyState:
                 nickserv_password=cfg.nickserv_password,
             )
             self.networks[cfg.name] = net
+            self._inject_meta(net, "lipservice started")
             if cfg.auto_connect:
                 client = IRCClient(
                     network_name=net.name, host=net.host, port=net.port,
@@ -399,6 +450,7 @@ class ProxyState:
 
     async def shutdown(self) -> None:
         for net in self.networks.values():
+            self._inject_meta(net, "lipservice stopping")
             self.cancel_reconnect(net)
             if net.client:
                 await net.client.disconnect()
