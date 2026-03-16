@@ -158,6 +158,16 @@ def migrate(database_uri: str) -> None:
     conn = psycopg.connect(database_uri, autocommit=True)
     try:
         conn.execute(_SCHEMA)
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM passphrase_probe WHERE id = 1")
+            has_probe = cur.fetchone() is not None
+        if not has_probe:
+            passphrase = getpass.getpass("LIPSERVICE_PASS: ")
+            if not passphrase:
+                print("Error: passphrase must not be empty.", file=sys.stderr)
+                sys.exit(1)
+            _write_probe(conn, passphrase)
+            print("Passphrase probe written.", file=sys.stderr)
         print("Schema up to date.", file=sys.stderr)
     finally:
         conn.close()
