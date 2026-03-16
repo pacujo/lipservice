@@ -18,6 +18,7 @@ from lipservice.models import (
     Message,
     MessagePage,
     MessageSend,
+    NetworkConfig,
     NetworkCreate,
     NetworkResponse,
     NetworkUpdate,
@@ -45,7 +46,7 @@ def _make_storage() -> StorageBackend:
             raise RuntimeError(
                 "LIPSERVICE_STORAGE=postgres requires LIPSERVICE_DATABASE_URI",
             )
-        return PostgresBackend(settings.database_uri)
+        return PostgresBackend(settings.database_uri, settings.password)
     if backend == "memory":
         return MemoryBackend(max_backlog=settings.max_backlog)
     raise RuntimeError(f"Unknown storage backend: {backend!r}")
@@ -53,6 +54,15 @@ def _make_storage() -> StorageBackend:
 
 router: APIRouter = APIRouter()
 proxy: ProxyState = ProxyState(storage=_make_storage())
+
+
+def _net_config(net: NetworkState) -> NetworkConfig:
+    return NetworkConfig(
+        name=net.name, host=net.host, port=net.port, tls=net.tls,
+        nick=net.nick, server_password=net.server_password,
+        nickserv_password=net.nickserv_password,
+        auto_connect=net.state in ("connected", "connecting"),
+    )
 
 
 def _net_response(net: NetworkState) -> NetworkResponse:
@@ -141,6 +151,7 @@ async def create_network(
         nickserv_password=body.nickserv_password,
     )
     proxy.networks[body.name] = net
+    proxy.storage.save_network(_net_config(net))
     return _net_response(net)
 
 
@@ -162,6 +173,7 @@ async def update_network(
 
     for field, value in updates.items():
         setattr(net, field, value)
+    proxy.storage.save_network(_net_config(net))
     return _net_response(net)
 
 
@@ -174,7 +186,8 @@ async def delete_network(
     if net.client:
         await net.client.disconnect()
     del proxy.networks[name]
-    proxy.storage.remove_network(name)
+    proxy.storage.delete_network(name)
+    proxy.storage.remove_network_data(name)
 
 
 @router.post("/networks/{name}/connect")
@@ -212,6 +225,7 @@ async def connect_network(
             "error": "upstream",
             "message": f"Failed to connect: {exc}",
         })
+    proxy.storage.save_network(_net_config(net))
     return _net_response(net)
 
 
@@ -225,6 +239,7 @@ async def disconnect_network(
         await net.client.disconnect()
         net.client = None
     net.state = "disconnected"
+    proxy.storage.save_network(_net_config(net))
     return _net_response(net)
 
 

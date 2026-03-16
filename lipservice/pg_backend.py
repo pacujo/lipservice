@@ -3,7 +3,8 @@ from __future__ import annotations
 import psycopg
 from psycopg.rows import dict_row
 
-from lipservice.models import Message, Session
+from lipservice.crypto import decrypt, encrypt
+from lipservice.models import Message, NetworkConfig, Session
 from lipservice.storage import StorageBackend
 
 _INSERT = """\
@@ -37,9 +38,10 @@ ORDER BY id
 class PostgresBackend(StorageBackend):
     """PostgreSQL message store using psycopg 3."""
 
-    def __init__(self, uri: str) -> None:
+    def __init__(self, uri: str, passphrase: str) -> None:
         self._conn = psycopg.connect(uri, row_factory=dict_row)
         self._conn.autocommit = True
+        self._passphrase = passphrase
 
     def next_message_id(self) -> str:
         with self._conn.cursor() as cur:
@@ -171,7 +173,60 @@ class PostgresBackend(StorageBackend):
                 for r in cur.fetchall()
             }
 
-    def remove_network(self, network: str) -> None:
+    def _decrypt_opt(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return decrypt(value, self._passphrase)
+
+    def _encrypt_opt(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return encrypt(value, self._passphrase)
+
+    def list_networks(self) -> list[NetworkConfig]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT name, host, port, tls, nick,"
+                " server_password, nickserv_password, auto_connect"
+                " FROM networks ORDER BY name",
+            )
+            rows = cur.fetchall()
+        return [
+            NetworkConfig(
+                **{**row,
+                   "server_password": self._decrypt_opt(row["server_password"]),
+                   "nickserv_password": self._decrypt_opt(row["nickserv_password"])},
+            )
+            for row in rows
+        ]
+
+    def save_network(self, config: NetworkConfig) -> None:
+        params = {
+            **config.model_dump(),
+            "server_password": self._encrypt_opt(config.server_password),
+            "nickserv_password": self._encrypt_opt(config.nickserv_password),
+        }
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO networks"
+                " (name, host, port, tls, nick,"
+                "  server_password, nickserv_password, auto_connect)"
+                " VALUES (%(name)s, %(host)s, %(port)s, %(tls)s, %(nick)s,"
+                "  %(server_password)s, %(nickserv_password)s, %(auto_connect)s)"
+                " ON CONFLICT (name) DO UPDATE SET"
+                "  host = EXCLUDED.host, port = EXCLUDED.port,"
+                "  tls = EXCLUDED.tls, nick = EXCLUDED.nick,"
+                "  server_password = EXCLUDED.server_password,"
+                "  nickserv_password = EXCLUDED.nickserv_password,"
+                "  auto_connect = EXCLUDED.auto_connect",
+                params,
+            )
+
+    def delete_network(self, name: str) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute("DELETE FROM networks WHERE name = %s", (name,))
+
+    def remove_network_data(self, network: str) -> None:
         with self._conn.cursor() as cur:
             cur.execute("DELETE FROM messages WHERE network = %s", (network,))
             cur.execute("DELETE FROM pointers WHERE network = %s", (network,))

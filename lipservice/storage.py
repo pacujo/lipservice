@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections import deque
 
-from lipservice.models import Message, Session
+from lipservice.models import Message, NetworkConfig, Session
 
 
 class StorageBackend(ABC):
@@ -69,7 +69,16 @@ class StorageBackend(ABC):
     def get_all_pointers(self) -> dict[str, str]: ...
 
     @abstractmethod
-    def remove_network(self, network: str) -> None: ...
+    def list_networks(self) -> list[NetworkConfig]: ...
+
+    @abstractmethod
+    def save_network(self, config: NetworkConfig) -> None: ...
+
+    @abstractmethod
+    def delete_network(self, name: str) -> None: ...
+
+    @abstractmethod
+    def remove_network_data(self, network: str) -> None: ...
 
 
 class MemoryBackend(StorageBackend):
@@ -81,6 +90,7 @@ class MemoryBackend(StorageBackend):
         self._channel_msgs: dict[tuple[str, str], deque[Message]] = {}
         self._meta_msgs: dict[str, deque[Message]] = {}
         self._private_msgs: dict[tuple[str, str], deque[Message]] = {}
+        self._networks: dict[str, NetworkConfig] = {}
         self._session: dict[str, str | None] = {
             "current_network": None,
             "current_channel": None,
@@ -178,7 +188,16 @@ class MemoryBackend(StorageBackend):
     ) -> None:
         self._private_msgs.pop((network, nick), None)
 
-    def remove_network(self, network: str) -> None:
+    def list_networks(self) -> list[NetworkConfig]:
+        return list(self._networks.values())
+
+    def save_network(self, config: NetworkConfig) -> None:
+        self._networks[config.name] = config
+
+    def delete_network(self, name: str) -> None:
+        self._networks.pop(name, None)
+
+    def remove_network_data(self, network: str) -> None:
         self._meta_msgs.pop(network, None)
         for key in [k for k in self._channel_msgs if k[0] == network]:
             del self._channel_msgs[key]

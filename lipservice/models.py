@@ -30,6 +30,17 @@ class TokenResponse(BaseModel):
     expires_at: str
 
 
+class NetworkConfig(BaseModel):
+    name: str
+    host: str
+    port: int = 6697
+    tls: bool = True
+    nick: str
+    server_password: str | None = None
+    nickserv_password: str | None = None
+    auto_connect: bool = False
+
+
 class NetworkCreate(BaseModel):
     name: str
     host: str

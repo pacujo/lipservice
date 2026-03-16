@@ -365,6 +365,38 @@ class ProxyState:
             net.reconnect_task.cancel()
             net.reconnect_task = None
 
+    async def restore_networks(self) -> None:
+        from lipservice.irc import IRCClient
+
+        configs = self.storage.list_networks()
+        for cfg in configs:
+            net = NetworkState(
+                name=cfg.name, host=cfg.host, port=cfg.port,
+                tls=cfg.tls, nick=cfg.nick,
+                server_password=cfg.server_password,
+                nickserv_password=cfg.nickserv_password,
+            )
+            self.networks[cfg.name] = net
+            if cfg.auto_connect:
+                client = IRCClient(
+                    network_name=net.name, host=net.host, port=net.port,
+                    tls=net.tls, nick=net.nick, user=net.nick,
+                    password=net.server_password,
+                    on_event=self.handle_irc_event,
+                )
+                net.client = client
+                net.state = "connecting"
+                net.auto_reconnect = True
+                try:
+                    await client.connect()
+                    log.info("Restored connection to %s", cfg.name)
+                except Exception:
+                    log.warning("Failed to restore %s, will reconnect",
+                                cfg.name)
+                    net.state = "disconnected"
+                    net.client = None
+                    self._start_reconnect(cfg.name)
+
     async def shutdown(self) -> None:
         for net in self.networks.values():
             self.cancel_reconnect(net)
