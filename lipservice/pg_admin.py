@@ -144,7 +144,7 @@ def migrate(database_uri: str) -> None:
 
 
 def passwd(database_uri: str, old_pass: str, new_pass: str) -> None:
-    conn = psycopg.connect(database_uri, row_factory=dict_row, autocommit=True)
+    conn = psycopg.connect(database_uri, row_factory=dict_row)
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -159,18 +159,25 @@ def passwd(database_uri: str, old_pass: str, new_pass: str) -> None:
             print("No encrypted passwords to re-key.", file=sys.stderr)
             return
 
+        # Re-encrypt in memory first; if the old password is wrong,
+        # decrypt() raises before any writes happen.
+        updates: list[tuple[str | None, str | None, str]] = []
         for row in rows:
             sp = row["server_password"]
             np = row["nickserv_password"]
             new_sp = encrypt(decrypt(sp, old_pass), new_pass) if sp else None
             new_np = encrypt(decrypt(np, old_pass), new_pass) if np else None
-            with conn.cursor() as cur:
+            updates.append((new_sp, new_np, row["name"]))
+
+        with conn.cursor() as cur:
+            for new_sp, new_np, name in updates:
                 cur.execute(
                     "UPDATE networks"
                     " SET server_password = %s, nickserv_password = %s"
                     " WHERE name = %s",
-                    (new_sp, new_np, row["name"]),
+                    (new_sp, new_np, name),
                 )
+        conn.commit()
         print(f"Re-encrypted passwords for {len(rows)} network(s).",
               file=sys.stderr)
     finally:
