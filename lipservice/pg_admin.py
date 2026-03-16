@@ -45,6 +45,20 @@ CREATE INDEX IF NOT EXISTS idx_messages_meta
 CREATE INDEX IF NOT EXISTS idx_messages_private
     ON messages (network, kind, target, id)
     WHERE kind = 'private';
+
+CREATE TABLE IF NOT EXISTS session (
+    id               INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    current_network  TEXT,
+    current_channel  TEXT,
+    current_query    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pointers (
+    network       TEXT NOT NULL,
+    target        TEXT NOT NULL,
+    last_read_id  TEXT NOT NULL,
+    PRIMARY KEY (network, target)
+);
 """
 
 

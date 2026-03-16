@@ -325,7 +325,7 @@ class TestStatus:
         resp = client.get("/api/status", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["version"] == "0.1.0"
+        assert data["version"] == "0.2.0"
         assert "uptime_seconds" in data
         assert data["networks_connected"] == 0
 

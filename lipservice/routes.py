@@ -20,6 +20,8 @@ from lipservice.models import (
     NetworkUpdate,
     NickChange,
     RawCommand,
+    Session,
+    SessionUpdate,
     TokenRequest,
     TopicUpdate,
 )
@@ -564,6 +566,29 @@ async def events(
     return EventSourceResponse(generate())
 
 
+# -- Session --------------------------------------------------------------
+
+@router.get("/session")
+async def get_session(
+    _auth: TokenEntry = Depends(require_auth),
+) -> Session:
+    return proxy.storage.get_session()
+
+
+@router.put("/session", status_code=204)
+async def set_session(
+    body: SessionUpdate, _auth: TokenEntry = Depends(require_auth),
+) -> None:
+    proxy.storage.set_session(
+        body.current_network, body.current_channel, body.current_query,
+    )
+    if body.pointers:
+        for key, last_read_id in body.pointers.items():
+            parts = key.split("/", 1)
+            if len(parts) == 2:
+                proxy.storage.set_pointer(parts[0], parts[1], last_read_id)
+
+
 # -- Status ---------------------------------------------------------------
 
 @router.get("/status")
@@ -573,7 +598,7 @@ async def status(
     connected: int = sum(1 for n in proxy.networks.values() if n.state == "connected")
     disconnected: int = len(proxy.networks) - connected
     return {
-        "version": "0.1.0",
+        "version": "0.2.0",
         "uptime_seconds": int(time.time() - proxy.start_time),
         "networks_connected": connected,
         "networks_disconnected": disconnected,

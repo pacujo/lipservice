@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from collections import deque
 from typing import Any
 
+from lipservice.models import Session
+
 
 class StorageBackend(ABC):
     """Abstract interface for message persistence."""
@@ -48,6 +50,26 @@ class StorageBackend(ABC):
     ) -> None: ...
 
     @abstractmethod
+    def get_session(self) -> Session: ...
+
+    @abstractmethod
+    def set_session(
+        self, current_network: str | None,
+        current_channel: str | None, current_query: str | None,
+    ) -> None: ...
+
+    @abstractmethod
+    def get_pointer(self, network: str, target: str) -> str | None: ...
+
+    @abstractmethod
+    def set_pointer(
+        self, network: str, target: str, last_read_id: str,
+    ) -> None: ...
+
+    @abstractmethod
+    def get_all_pointers(self) -> dict[str, str]: ...
+
+    @abstractmethod
     def remove_network(self, network: str) -> None: ...
 
 
@@ -64,6 +86,12 @@ class MemoryBackend(StorageBackend):
         self._private_msgs: dict[
             tuple[str, str], deque[dict[str, Any]]
         ] = {}
+        self._session: dict[str, str | None] = {
+            "current_network": None,
+            "current_channel": None,
+            "current_query": None,
+        }
+        self._pointers: dict[str, str] = {}
 
     def next_message_id(self) -> str:
         self._msg_counter += 1
@@ -117,6 +145,33 @@ class MemoryBackend(StorageBackend):
         self, network: str, nick: str,
     ) -> list[dict[str, Any]]:
         return list(self._private_deque(network, nick))
+
+    def get_session(self) -> Session:
+        return Session(
+            current_network=self._session["current_network"],
+            current_channel=self._session["current_channel"],
+            current_query=self._session["current_query"],
+            pointers=dict(self._pointers),
+        )
+
+    def set_session(
+        self, current_network: str | None,
+        current_channel: str | None, current_query: str | None,
+    ) -> None:
+        self._session["current_network"] = current_network
+        self._session["current_channel"] = current_channel
+        self._session["current_query"] = current_query
+
+    def get_pointer(self, network: str, target: str) -> str | None:
+        return self._pointers.get(f"{network}/{target}")
+
+    def set_pointer(
+        self, network: str, target: str, last_read_id: str,
+    ) -> None:
+        self._pointers[f"{network}/{target}"] = last_read_id
+
+    def get_all_pointers(self) -> dict[str, str]:
+        return dict(self._pointers)
 
     def list_private_peers(self, network: str) -> list[str]:
         return sorted({

@@ -5,6 +5,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
+from lipservice.models import Session
 from lipservice.storage import StorageBackend
 
 _INSERT = """\
@@ -112,6 +113,67 @@ class PostgresBackend(StorageBackend):
                 (network, nick),
             )
 
+    def get_session(self) -> Session:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT current_network, current_channel, current_query"
+                " FROM session WHERE id = 1",
+            )
+            row = cur.fetchone()
+        return Session(
+            current_network=row["current_network"] if row else None,
+            current_channel=row["current_channel"] if row else None,
+            current_query=row["current_query"] if row else None,
+            pointers=self.get_all_pointers(),
+        )
+
+    def set_session(
+        self, current_network: str | None,
+        current_channel: str | None, current_query: str | None,
+    ) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO session (id, current_network,"
+                " current_channel, current_query)"
+                " VALUES (1, %s, %s, %s)"
+                " ON CONFLICT (id) DO UPDATE SET"
+                " current_network = EXCLUDED.current_network,"
+                " current_channel = EXCLUDED.current_channel,"
+                " current_query = EXCLUDED.current_query",
+                (current_network, current_channel, current_query),
+            )
+
+    def get_pointer(self, network: str, target: str) -> str | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT last_read_id FROM pointers"
+                " WHERE network = %s AND target = %s",
+                (network, target),
+            )
+            row = cur.fetchone()
+            return row["last_read_id"] if row else None
+
+    def set_pointer(
+        self, network: str, target: str, last_read_id: str,
+    ) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO pointers (network, target, last_read_id)"
+                " VALUES (%s, %s, %s)"
+                " ON CONFLICT (network, target) DO UPDATE"
+                " SET last_read_id = EXCLUDED.last_read_id",
+                (network, target, last_read_id),
+            )
+
+    def get_all_pointers(self) -> dict[str, str]:
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT network, target, last_read_id FROM pointers")
+            return {
+                f"{r['network']}/{r['target']}": r["last_read_id"]
+                for r in cur.fetchall()
+            }
+
     def remove_network(self, network: str) -> None:
         with self._conn.cursor() as cur:
             cur.execute("DELETE FROM messages WHERE network = %s", (network,))
+            cur.execute("DELETE FROM pointers WHERE network = %s", (network,))

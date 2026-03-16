@@ -1,6 +1,6 @@
 # Lipservice Client Protocol
 
-Version: 0.1 (draft)
+Version: 0.2 (draft)
 
 ## Overview
 
@@ -486,7 +486,7 @@ GET /status
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "uptime_seconds": 302400,
   "networks_connected": 2,
   "networks_disconnected": 1
@@ -554,6 +554,64 @@ Without filters, all events for all networks are delivered.
 If the SSE connection drops, the client reconnects and uses the REST API
 to catch up (e.g. `GET /networks/:net/channels/:chan/messages?after=<last_id>`).
 No server-side event replay is needed.
+
+## Session
+
+The proxy stores client session state so it can be restored across
+client restarts. The structure is well-defined so any conforming client
+can read and write it.
+
+#### Get session
+
+```
+GET /session
+```
+
+Returns:
+
+```json
+{
+  "current_network": "oftc",
+  "current_channel": "#debian",
+  "current_query": null,
+  "pointers": {
+    "oftc/#debian": "msg_000000000042",
+    "oftc/alice": "msg_000000000035"
+  }
+}
+```
+
+| Field             | Type           | Description |
+|-------------------|----------------|-------------|
+| `current_network` | string or null | Last-selected network. |
+| `current_channel` | string or null | Last-selected channel (mutually exclusive with `current_query`). |
+| `current_query`   | string or null | Last-selected PM peer (mutually exclusive with `current_channel`). |
+| `pointers`        | object         | Map of `"network/target"` to last-read message ID. |
+
+#### Save session
+
+```
+PUT /session
+Content-Type: application/json
+
+{
+  "current_network": "oftc",
+  "current_channel": "#debian",
+  "current_query": null,
+  "pointers": {
+    "oftc/#debian": "msg_000000000042"
+  }
+}
+```
+
+Returns `204 No Content`. All fields are optional; omitted fields are
+set to null. The `pointers` map is merged into the existing pointers
+(existing keys not present in the request are preserved).
+
+The proxy stores these fields in dedicated columns and tables (not an
+opaque blob), so the schema is part of the protocol contract.
+
+---
 
 ## Error Format
 

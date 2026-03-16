@@ -85,6 +85,20 @@ class StatusResponse(BaseModel):
     networks_disconnected: int
 
 
+class Session(BaseModel):
+    current_network: str | None = None
+    current_channel: str | None = None
+    current_query: str | None = None
+    pointers: dict[str, str] = {}
+
+
+class SessionUpdate(BaseModel):
+    current_network: str | None = None
+    current_channel: str | None = None
+    current_query: str | None = None
+    pointers: dict[str, str] | None = None
+
+
 class ErrorResponse(BaseModel):
     error: str
     message: str
