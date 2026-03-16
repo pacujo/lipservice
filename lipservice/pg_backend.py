@@ -38,10 +38,31 @@ ORDER BY id
 class PostgresBackend(StorageBackend):
     """PostgreSQL message store using psycopg 3."""
 
+    _PROBE_PLAINTEXT = "lipservice-probe"
+
     def __init__(self, uri: str, passphrase: str) -> None:
         self._conn = psycopg.connect(uri, row_factory=dict_row)
         self._conn.autocommit = True
         self._passphrase = passphrase
+        self._verify_probe()
+
+    def _verify_probe(self) -> None:
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT token FROM passphrase_probe WHERE id = 1")
+            row = cur.fetchone()
+        if not row:
+            return
+        try:
+            result = decrypt(row["token"], self._passphrase)
+        except Exception as exc:
+            raise RuntimeError(
+                "LIPSERVICE_PASS does not match the stored passphrase probe. "
+                "Use 'python -m lipservice.pg_admin passwd' to re-key.",
+            ) from exc
+        if result != self._PROBE_PLAINTEXT:
+            raise RuntimeError(
+                "Passphrase probe decrypted but content mismatch.",
+            )
 
     def next_message_id(self) -> str:
         with self._conn.cursor() as cur:

@@ -21,6 +21,7 @@ import argparse
 import getpass
 import secrets
 import sys
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import psycopg
@@ -79,7 +80,14 @@ CREATE TABLE IF NOT EXISTS pointers (
     last_read_id  TEXT NOT NULL,
     PRIMARY KEY (network, target)
 );
+
+CREATE TABLE IF NOT EXISTS passphrase_probe (
+    id    INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    token TEXT NOT NULL
+);
 """
+
+_PROBE_PLAINTEXT = "lipservice-probe"
 
 
 def _app_uri(admin_uri: str, role: str, password: str, dbname: str) -> str:
@@ -94,7 +102,18 @@ def _app_uri(admin_uri: str, role: str, password: str, dbname: str) -> str:
     ))
 
 
-def setup(admin_uri: str, role: str, dbname: str) -> None:
+def _write_probe(conn: psycopg.Connection[Any], passphrase: str) -> None:
+    token = encrypt(_PROBE_PLAINTEXT, passphrase)
+    conn.execute(
+        "INSERT INTO passphrase_probe (id, token) VALUES (1, %s)"
+        " ON CONFLICT (id) DO UPDATE SET token = EXCLUDED.token",
+        (token,),
+    )
+
+
+def setup(
+    admin_uri: str, role: str, dbname: str, passphrase: str,
+) -> None:
     password = secrets.token_urlsafe(24)
     conn = psycopg.connect(admin_uri, autocommit=True)
     try:
@@ -127,6 +146,7 @@ def setup(admin_uri: str, role: str, dbname: str) -> None:
     app_conn = psycopg.connect(app_conn_uri, autocommit=True)
     try:
         app_conn.execute(_SCHEMA)
+        _write_probe(app_conn, passphrase)
         print("Schema applied.", file=sys.stderr)
     finally:
         app_conn.close()
@@ -146,6 +166,20 @@ def migrate(database_uri: str) -> None:
 def passwd(database_uri: str, old_pass: str, new_pass: str) -> None:
     conn = psycopg.connect(database_uri, row_factory=dict_row)
     try:
+        # Verify the old passphrase against the stored probe first.
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT token FROM passphrase_probe WHERE id = 1",
+            )
+            probe_row = cur.fetchone()
+        if probe_row:
+            try:
+                decrypt(probe_row["token"], old_pass)
+            except Exception:
+                print("Error: old passphrase is incorrect.",
+                      file=sys.stderr)
+                sys.exit(1)
+
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT name, server_password, nickserv_password"
@@ -154,10 +188,6 @@ def passwd(database_uri: str, old_pass: str, new_pass: str) -> None:
                 "    OR nickserv_password IS NOT NULL",
             )
             rows = cur.fetchall()
-
-        if not rows:
-            print("No encrypted passwords to re-key.", file=sys.stderr)
-            return
 
         # Re-encrypt in memory first; if the old password is wrong,
         # decrypt() raises before any writes happen.
@@ -177,8 +207,9 @@ def passwd(database_uri: str, old_pass: str, new_pass: str) -> None:
                     " WHERE name = %s",
                     (new_sp, new_np, name),
                 )
+        _write_probe(conn, new_pass)
         conn.commit()
-        print(f"Re-encrypted passwords for {len(rows)} network(s).",
+        print(f"Re-keyed probe and {len(rows)} network(s).",
               file=sys.stderr)
     finally:
         conn.close()
@@ -267,8 +298,12 @@ def main() -> None:
 
     try:
         if args.action == "setup":
+            passphrase = getpass.getpass("LIPSERVICE_PASS: ")
+            if not passphrase:
+                print("Error: passphrase must not be empty.", file=sys.stderr)
+                sys.exit(1)
             dbname: str = args.dbname or args.role
-            setup(args.admin_uri, args.role, dbname)
+            setup(args.admin_uri, args.role, dbname, passphrase)
         elif args.action == "migrate":
             migrate(args.database_uri)
         elif args.action == "passwd":
