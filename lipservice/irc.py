@@ -273,15 +273,29 @@ class IRCClient:
         self.nick = self.nick + "_"
         await self.send("NICK", self.nick)
 
+    async def _handle_ctcp(self, nick: str, ctcp: str) -> None:
+        cmd = ctcp.split(" ", 1)[0].upper()
+        if cmd == "VERSION":
+            await self.send(
+                "NOTICE", nick, f"\x01VERSION lipservice 0.2\x01",
+            )
+        elif cmd == "PING":
+            await self.send("NOTICE", nick, f"\x01{ctcp}\x01")
+
     async def _on_privmsg(self, msg: IRCMessage) -> None:
         nick, user, host = self._parse_prefix(msg.prefix or "")
         target: str = msg.params[0]
         text: str = msg.params[1] if len(msg.params) > 1 else ""
 
         msg_type: str = "privmsg"
-        if text.startswith("\x01ACTION ") and text.endswith("\x01"):
-            msg_type = "action"
-            text = text[8:-1]
+        if text.startswith("\x01") and text.endswith("\x01"):
+            ctcp = text[1:-1]
+            if ctcp.startswith("ACTION "):
+                msg_type = "action"
+                text = ctcp[7:]
+            else:
+                await self._handle_ctcp(nick, ctcp)
+                return
 
         is_channel = target.startswith(("#", "&", "+", "!"))
         data: dict[str, str] = {"from": nick, "type": msg_type, "text": text}
@@ -295,6 +309,9 @@ class IRCClient:
         nick, _, _ = self._parse_prefix(msg.prefix or "")
         target: str = msg.params[0]
         text: str = msg.params[1] if len(msg.params) > 1 else ""
+
+        if text.startswith("\x01") and text.endswith("\x01"):
+            return
 
         is_channel = target.startswith(("#", "&", "+", "!"))
         data: dict[str, str] = {"from": nick, "type": "notice", "text": text}
