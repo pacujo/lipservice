@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Any
 
-from lipservice.models import Session
+from lipservice.models import Message, Session
 
 
 class StorageBackend(ABC):
@@ -15,31 +14,31 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def append_channel_message(
-        self, network: str, channel: str, msg: dict[str, Any],
+        self, network: str, channel: str, msg: Message,
     ) -> None: ...
 
     @abstractmethod
     def append_meta_message(
-        self, network: str, msg: dict[str, Any],
+        self, network: str, msg: Message,
     ) -> None: ...
 
     @abstractmethod
     def append_private_message(
-        self, network: str, nick: str, msg: dict[str, Any],
+        self, network: str, nick: str, msg: Message,
     ) -> None: ...
 
     @abstractmethod
     def get_channel_messages(
         self, network: str, channel: str,
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[Message]: ...
 
     @abstractmethod
-    def get_meta_messages(self, network: str) -> list[dict[str, Any]]: ...
+    def get_meta_messages(self, network: str) -> list[Message]: ...
 
     @abstractmethod
     def get_private_messages(
         self, network: str, nick: str,
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[Message]: ...
 
     @abstractmethod
     def list_private_peers(self, network: str) -> list[str]: ...
@@ -79,13 +78,9 @@ class MemoryBackend(StorageBackend):
     def __init__(self, max_backlog: int = 1000) -> None:
         self._max_backlog = max_backlog
         self._msg_counter = 0
-        self._channel_msgs: dict[
-            tuple[str, str], deque[dict[str, Any]]
-        ] = {}
-        self._meta_msgs: dict[str, deque[dict[str, Any]]] = {}
-        self._private_msgs: dict[
-            tuple[str, str], deque[dict[str, Any]]
-        ] = {}
+        self._channel_msgs: dict[tuple[str, str], deque[Message]] = {}
+        self._meta_msgs: dict[str, deque[Message]] = {}
+        self._private_msgs: dict[tuple[str, str], deque[Message]] = {}
         self._session: dict[str, str | None] = {
             "current_network": None,
             "current_channel": None,
@@ -99,51 +94,51 @@ class MemoryBackend(StorageBackend):
 
     def _channel_deque(
         self, network: str, channel: str,
-    ) -> deque[dict[str, Any]]:
+    ) -> deque[Message]:
         key = (network, channel)
         if key not in self._channel_msgs:
             self._channel_msgs[key] = deque(maxlen=self._max_backlog)
         return self._channel_msgs[key]
 
-    def _meta_deque(self, network: str) -> deque[dict[str, Any]]:
+    def _meta_deque(self, network: str) -> deque[Message]:
         if network not in self._meta_msgs:
             self._meta_msgs[network] = deque(maxlen=self._max_backlog)
         return self._meta_msgs[network]
 
     def _private_deque(
         self, network: str, nick: str,
-    ) -> deque[dict[str, Any]]:
+    ) -> deque[Message]:
         key = (network, nick)
         if key not in self._private_msgs:
             self._private_msgs[key] = deque(maxlen=self._max_backlog)
         return self._private_msgs[key]
 
     def append_channel_message(
-        self, network: str, channel: str, msg: dict[str, Any],
+        self, network: str, channel: str, msg: Message,
     ) -> None:
         self._channel_deque(network, channel).append(msg)
 
     def append_meta_message(
-        self, network: str, msg: dict[str, Any],
+        self, network: str, msg: Message,
     ) -> None:
         self._meta_deque(network).append(msg)
 
     def append_private_message(
-        self, network: str, nick: str, msg: dict[str, Any],
+        self, network: str, nick: str, msg: Message,
     ) -> None:
         self._private_deque(network, nick).append(msg)
 
     def get_channel_messages(
         self, network: str, channel: str,
-    ) -> list[dict[str, Any]]:
+    ) -> list[Message]:
         return list(self._channel_deque(network, channel))
 
-    def get_meta_messages(self, network: str) -> list[dict[str, Any]]:
+    def get_meta_messages(self, network: str) -> list[Message]:
         return list(self._meta_deque(network))
 
     def get_private_messages(
         self, network: str, nick: str,
-    ) -> list[dict[str, Any]]:
+    ) -> list[Message]:
         return list(self._private_deque(network, nick))
 
     def get_session(self) -> Session:

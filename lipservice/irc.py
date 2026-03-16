@@ -7,8 +7,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-_KEEPALIVE_INTERVAL: int = 60
-_KEEPALIVE_TIMEOUT: int = 120
+_KEEPALIVE_INTERVAL = 60
+_KEEPALIVE_TIMEOUT = 120
 
 
 @dataclass
@@ -283,8 +283,8 @@ class IRCClient:
             msg_type = "action"
             text = text[8:-1]
 
-        is_channel: bool = target.startswith(("#", "&", "+", "!"))
-        data: dict[str, Any] = {"from": nick, "type": msg_type, "text": text}
+        is_channel = target.startswith(("#", "&", "+", "!"))
+        data: dict[str, str] = {"from": nick, "type": msg_type, "text": text}
         if is_channel:
             data["channel"] = target
         else:
@@ -296,8 +296,8 @@ class IRCClient:
         target: str = msg.params[0]
         text: str = msg.params[1] if len(msg.params) > 1 else ""
 
-        is_channel: bool = target.startswith(("#", "&", "+", "!"))
-        data: dict[str, Any] = {"from": nick, "type": "notice", "text": text}
+        is_channel = target.startswith(("#", "&", "+", "!"))
+        data: dict[str, str] = {"from": nick, "type": "notice", "text": text}
         if is_channel:
             data["channel"] = target
         else:

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-import logging
-
 if TYPE_CHECKING:
     from lipservice.irc import IRCClient
+    from lipservice.models import Message
     from lipservice.storage import StorageBackend
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ class ProxyState:
                 fut.set_result(None)
 
     def _inject_meta(self, net: NetworkState, text: str) -> None:
-        msg: dict[str, Any] = {
+        msg: Message = {
             "id": self.storage.next_message_id(),
             "time": datetime.now(timezone.utc).isoformat(),
             "from": "",
@@ -175,7 +175,7 @@ class ProxyState:
 
         elif event_type == "message":
             msg_id = self.storage.next_message_id()
-            msg: dict[str, Any] = {
+            msg: Message = {
                 "id": msg_id,
                 "time": now,
                 "from": data["from"],

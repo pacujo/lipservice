@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
-
 import psycopg
 from psycopg.rows import dict_row
 
-from lipservice.models import Session
+from lipservice.models import Message, Session
 from lipservice.storage import StorageBackend
 
 _INSERT = """\
@@ -52,7 +50,7 @@ class PostgresBackend(StorageBackend):
         return f"msg_{val:012d}"
 
     def _insert(
-        self, network: str, kind: str, target: str, msg: dict[str, Any],
+        self, network: str, kind: str, target: str, msg: Message,
     ) -> None:
         with self._conn.cursor() as cur:
             cur.execute(_INSERT, {
@@ -60,38 +58,38 @@ class PostgresBackend(StorageBackend):
             })
 
     def append_channel_message(
-        self, network: str, channel: str, msg: dict[str, Any],
+        self, network: str, channel: str, msg: Message,
     ) -> None:
         self._insert(network, "channel", channel, msg)
 
     def append_meta_message(
-        self, network: str, msg: dict[str, Any],
+        self, network: str, msg: Message,
     ) -> None:
         self._insert(network, "meta", "", msg)
 
     def append_private_message(
-        self, network: str, nick: str, msg: dict[str, Any],
+        self, network: str, nick: str, msg: Message,
     ) -> None:
         self._insert(network, "private", nick, msg)
 
     def get_channel_messages(
         self, network: str, channel: str,
-    ) -> list[dict[str, Any]]:
+    ) -> list[Message]:
         with self._conn.cursor() as cur:
             cur.execute(_SELECT_CHANNEL, (network, channel))
-            return cur.fetchall()
+            return cur.fetchall()  # type: ignore[return-value]
 
-    def get_meta_messages(self, network: str) -> list[dict[str, Any]]:
+    def get_meta_messages(self, network: str) -> list[Message]:
         with self._conn.cursor() as cur:
             cur.execute(_SELECT_META, (network,))
-            return cur.fetchall()
+            return cur.fetchall()  # type: ignore[return-value]
 
     def get_private_messages(
         self, network: str, nick: str,
-    ) -> list[dict[str, Any]]:
+    ) -> list[Message]:
         with self._conn.cursor() as cur:
             cur.execute(_SELECT_PRIVATE, (network, nick))
-            return cur.fetchall()
+            return cur.fetchall()  # type: ignore[return-value]
 
     def list_private_peers(self, network: str) -> list[str]:
         with self._conn.cursor() as cur:

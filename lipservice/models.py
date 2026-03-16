@@ -1,6 +1,23 @@
 from __future__ import annotations
 
+from typing import TypedDict
+
 from pydantic import BaseModel
+
+
+# "from" is a Python keyword, so we use the functional form.
+Message = TypedDict("Message", {
+    "id": str,
+    "time": str,
+    "from": str,
+    "type": str,
+    "text": str,
+})
+
+
+class MessagePage(BaseModel):
+    messages: list[Message]
+    has_more: bool
 
 
 class TokenRequest(BaseModel):
@@ -50,6 +67,7 @@ class ChannelJoin(BaseModel):
 class ChannelResponse(BaseModel):
     name: str
     topic: str
+    topic_set_by: str = ""
     joined: bool
     members_count: int
 
@@ -76,6 +94,22 @@ class NickChange(BaseModel):
 
 class RawCommand(BaseModel):
     command: str
+
+
+class QueryPeer(BaseModel):
+    nick: str
+
+
+class UserResponse(BaseModel):
+    username: str
+    networks: list[str]
+
+
+class NetworkUserResponse(BaseModel):
+    nick: str
+    user: str
+    host: str
+    modes: str
 
 
 class StatusResponse(BaseModel):

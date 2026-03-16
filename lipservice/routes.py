@@ -5,8 +5,6 @@ import json
 import time
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
-from typing import Any
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
@@ -15,15 +13,25 @@ from lipservice.config import settings
 from lipservice.irc import IRCClient
 from lipservice.models import (
     ChannelJoin,
+    ChannelResponse,
+    MemberResponse,
+    Message,
+    MessagePage,
     MessageSend,
     NetworkCreate,
+    NetworkResponse,
     NetworkUpdate,
+    NetworkUserResponse,
     NickChange,
+    QueryPeer,
     RawCommand,
     Session,
     SessionUpdate,
+    StatusResponse,
     TokenRequest,
+    TokenResponse,
     TopicUpdate,
+    UserResponse,
 )
 from lipservice.state import ChannelState, NetworkState, ProxyState
 from lipservice.storage import MemoryBackend, StorageBackend
@@ -47,16 +55,16 @@ router: APIRouter = APIRouter()
 proxy: ProxyState = ProxyState(storage=_make_storage())
 
 
-def _net_response(net: NetworkState) -> dict[str, Any]:
-    return {
-        "name": net.name,
-        "host": net.host,
-        "port": net.port,
-        "tls": net.tls,
-        "nick": net.nick,
-        "state": net.state,
-        "channels": [n for n, ch in net.channels.items() if ch.joined],
-    }
+def _net_response(net: NetworkState) -> NetworkResponse:
+    return NetworkResponse(
+        name=net.name,
+        host=net.host,
+        port=net.port,
+        tls=net.tls,
+        nick=net.nick,
+        state=net.state,
+        channels=[n for n, ch in net.channels.items() if ch.joined],
+    )
 
 
 def _get_network(name: str) -> NetworkState:
@@ -82,14 +90,14 @@ def _get_connected_network(name: str) -> tuple[NetworkState, IRCClient]:
 # -- Auth -----------------------------------------------------------------
 
 @router.post("/auth/token")
-async def create_token(body: TokenRequest) -> dict[str, str]:
+async def create_token(body: TokenRequest) -> TokenResponse:
     if body.username != settings.username or body.password != settings.password:
         raise HTTPException(401, detail={
             "error": "unauthorized", "message": "Bad credentials.",
         })
     entry = token_store.create(body.username)
-    expires: str = datetime.fromtimestamp(entry.expires_at, tz=timezone.utc).isoformat()
-    return {"token": entry.token, "expires_at": expires}
+    expires = datetime.fromtimestamp(entry.expires_at, tz=timezone.utc).isoformat()
+    return TokenResponse(token=entry.token, expires_at=expires)
 
 
 @router.delete("/auth/token", status_code=204)
@@ -103,21 +111,21 @@ async def revoke_token(request: Request, _auth: TokenEntry = Depends(require_aut
 @router.get("/networks")
 async def list_networks(
     _auth: TokenEntry = Depends(require_auth),
-) -> list[dict[str, Any]]:
+) -> list[NetworkResponse]:
     return [_net_response(n) for n in proxy.networks.values()]
 
 
 @router.get("/networks/{name}")
 async def get_network(
     name: str, _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> NetworkResponse:
     return _net_response(_get_network(name))
 
 
 @router.post("/networks", status_code=201)
 async def create_network(
     body: NetworkCreate, _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> NetworkResponse:
     if body.name in proxy.networks:
         raise HTTPException(409, detail={
             "error": "conflict",
@@ -142,9 +150,9 @@ _CONNECTION_FIELDS: set[str] = {"host", "port", "tls", "nick", "server_password"
 @router.patch("/networks/{name}")
 async def update_network(
     name: str, body: NetworkUpdate, _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> NetworkResponse:
     net = _get_network(name)
-    updates: dict[str, Any] = body.model_dump(exclude_unset=True)
+    updates = body.model_dump(exclude_unset=True)
 
     if net.client and updates.keys() & _CONNECTION_FIELDS:
         proxy.cancel_reconnect(net)
@@ -172,7 +180,7 @@ async def delete_network(
 @router.post("/networks/{name}/connect")
 async def connect_network(
     name: str, _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> NetworkResponse:
     net = _get_network(name)
     if net.state in ("connected", "connecting") and net.client:
         return _net_response(net)
@@ -210,7 +218,7 @@ async def connect_network(
 @router.post("/networks/{name}/disconnect")
 async def disconnect_network(
     name: str, _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> NetworkResponse:
     net = _get_network(name)
     proxy.cancel_reconnect(net)
     if net.client:
@@ -225,23 +233,21 @@ async def disconnect_network(
 @router.get("/networks/{network}/channels")
 async def list_channels(
     network: str, _auth: TokenEntry = Depends(require_auth),
-) -> list[dict[str, Any]]:
+) -> list[ChannelResponse]:
     net = _get_network(network)
-    result: list[dict[str, Any]] = []
-    for ch in net.channels.values():
-        result.append({
-            "name": ch.name,
-            "topic": ch.topic,
-            "joined": ch.joined,
-            "members_count": len(ch.members),
-        })
-    return result
+    return [
+        ChannelResponse(
+            name=ch.name, topic=ch.topic,
+            joined=ch.joined, members_count=len(ch.members),
+        )
+        for ch in net.channels.values()
+    ]
 
 
 @router.get("/networks/{network}/channels/{channel}")
 async def get_channel(
     network: str, channel: str, _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> ChannelResponse:
     net = _get_network(network)
     ch = net.channels.get(channel)
     if not ch:
@@ -249,19 +255,16 @@ async def get_channel(
             "error": "not_found",
             "message": f'Channel "{channel}" not found.',
         })
-    return {
-        "name": ch.name,
-        "topic": ch.topic,
-        "topic_set_by": ch.topic_set_by,
-        "joined": ch.joined,
-        "members_count": len(ch.members),
-    }
+    return ChannelResponse(
+        name=ch.name, topic=ch.topic, topic_set_by=ch.topic_set_by,
+        joined=ch.joined, members_count=len(ch.members),
+    )
 
 
 @router.post("/networks/{network}/channels", status_code=201)
 async def join_channel(
     network: str, body: ChannelJoin, _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> ChannelResponse:
     net, client = _get_connected_network(network)
     ch_existing = net.channels.get(body.name)
     if ch_existing and ch_existing.joined:
@@ -284,12 +287,12 @@ async def join_channel(
             "message": str(exc),
         })
     ch = net.channels.get(body.name)
-    return {
-        "name": body.name,
-        "topic": ch.topic if ch else "",
-        "joined": ch.joined if ch else False,
-        "members_count": len(ch.members) if ch else 0,
-    }
+    return ChannelResponse(
+        name=body.name,
+        topic=ch.topic if ch else "",
+        joined=ch.joined if ch else False,
+        members_count=len(ch.members) if ch else 0,
+    )
 
 
 @router.delete("/networks/{network}/channels/{channel}", status_code=204)
@@ -304,17 +307,17 @@ async def part_channel(
 async def set_topic(
     network: str, channel: str, body: TopicUpdate,
     _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> ChannelResponse:
     net, client = _get_connected_network(network)
     await client.set_topic(channel, body.text)
     await asyncio.sleep(0.3)
     ch = net.channels.get(channel)
-    return {
-        "name": channel,
-        "topic": ch.topic if ch else body.text,
-        "joined": True,
-        "members_count": len(ch.members) if ch else 0,
-    }
+    return ChannelResponse(
+        name=channel,
+        topic=ch.topic if ch else body.text,
+        joined=True,
+        members_count=len(ch.members) if ch else 0,
+    )
 
 
 # -- Members --------------------------------------------------------------
@@ -322,7 +325,7 @@ async def set_topic(
 @router.get("/networks/{network}/channels/{channel}/members")
 async def list_members(
     network: str, channel: str, _auth: TokenEntry = Depends(require_auth),
-) -> list[dict[str, str]]:
+) -> list[MemberResponse]:
     net = _get_network(network)
     ch = net.channels.get(channel)
     if not ch:
@@ -331,7 +334,7 @@ async def list_members(
             "message": f'Channel "{channel}" not found.',
         })
     return [
-        {"nick": m.nick, "prefix": m.prefix, "user": m.user, "host": m.host}
+        MemberResponse(nick=m.nick, prefix=m.prefix, user=m.user, host=m.host)
         for m in ch.members.values()
     ]
 
@@ -346,7 +349,7 @@ async def list_channel_messages(
     before: str | None = Query(None),
     after: str | None = Query(None),
     _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> MessagePage:
     net = _get_network(network)
     ch = net.channels.get(channel)
     if not ch:
@@ -366,7 +369,7 @@ async def send_channel_message(
     channel: str,
     body: MessageSend,
     _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> Message:
     net, client = _get_connected_network(network)
     if body.type == "notice":
         await client.notice(channel, body.text)
@@ -375,9 +378,9 @@ async def send_channel_message(
     else:
         await client.privmsg(channel, body.text)
 
-    now: str = datetime.now(timezone.utc).isoformat()
-    msg_id: str = proxy.storage.next_message_id()
-    msg: dict[str, Any] = {
+    now = datetime.now(timezone.utc).isoformat()
+    msg_id = proxy.storage.next_message_id()
+    msg: Message = {
         "id": msg_id, "time": now, "from": net.nick, "type": body.type, "text": body.text,
     }
 
@@ -394,10 +397,10 @@ async def send_channel_message(
 @router.get("/networks/{network}/queries")
 async def list_queries(
     network: str, _auth: TokenEntry = Depends(require_auth),
-) -> list[dict[str, str]]:
+) -> list[QueryPeer]:
     _get_network(network)
     peers = proxy.storage.list_private_peers(network)
-    return [{"nick": p} for p in peers]
+    return [QueryPeer(nick=p) for p in peers]
 
 
 @router.get("/networks/{network}/messages/{nick}")
@@ -408,7 +411,7 @@ async def list_private_messages(
     before: str | None = Query(None),
     after: str | None = Query(None),
     _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> MessagePage:
     _get_network(network)
     msgs = proxy.storage.get_private_messages(network, nick)
     meta = proxy.storage.get_meta_messages(network)
@@ -432,7 +435,7 @@ async def send_private_message(
     nick: str,
     body: MessageSend,
     _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
+) -> Message:
     net, client = _get_connected_network(network)
     if body.type == "notice":
         await client.notice(nick, body.text)
@@ -441,9 +444,9 @@ async def send_private_message(
     else:
         await client.privmsg(nick, body.text)
 
-    now: str = datetime.now(timezone.utc).isoformat()
-    msg_id: str = proxy.storage.next_message_id()
-    msg: dict[str, Any] = {
+    now = datetime.now(timezone.utc).isoformat()
+    msg_id = proxy.storage.next_message_id()
+    msg: Message = {
         "id": msg_id, "time": now, "from": net.nick, "type": body.type, "text": body.text,
     }
 
@@ -456,10 +459,10 @@ async def send_private_message(
 
 
 def _paginate_messages(
-    buf: list[dict[str, Any]], limit: int,
+    buf: list[Message], limit: int,
     before: str | None, after: str | None,
-) -> dict[str, Any]:
-    msgs: list[dict[str, Any]] = list(buf)
+) -> MessagePage:
+    msgs = list(buf)
     if before:
         idx = next((i for i, m in enumerate(msgs) if m["id"] == before), None)
         if idx is not None:
@@ -468,9 +471,9 @@ def _paginate_messages(
         idx = next((i for i, m in enumerate(msgs) if m["id"] == after), None)
         if idx is not None:
             msgs = msgs[idx + 1:]
-    has_more: bool = len(msgs) > limit
+    has_more = len(msgs) > limit
     msgs = msgs[-limit:]
-    return {"messages": msgs, "has_more": has_more}
+    return MessagePage(messages=msgs, has_more=has_more)
 
 
 # -- User -----------------------------------------------------------------
@@ -478,39 +481,37 @@ def _paginate_messages(
 @router.get("/user")
 async def get_user(
     _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
-    return {
-        "username": _auth.username,
-        "networks": list(proxy.networks.keys()),
-    }
+) -> UserResponse:
+    return UserResponse(
+        username=_auth.username,
+        networks=list(proxy.networks.keys()),
+    )
+
+
+def _network_user_response(net: NetworkState) -> NetworkUserResponse:
+    return NetworkUserResponse(
+        nick=net.nick,
+        user=net.irc_user or net.nick,
+        host=net.irc_host,
+        modes=net.modes,
+    )
 
 
 @router.get("/networks/{network}/user")
 async def get_network_user(
     network: str, _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, str]:
-    net = _get_network(network)
-    return {
-        "nick": net.nick,
-        "user": net.irc_user or net.nick,
-        "host": net.irc_host,
-        "modes": net.modes,
-    }
+) -> NetworkUserResponse:
+    return _network_user_response(_get_network(network))
 
 
 @router.put("/networks/{network}/user/nick")
 async def change_nick(
     network: str, body: NickChange, _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, str]:
+) -> NetworkUserResponse:
     net, client = _get_connected_network(network)
     await client.set_nick(body.nick)
     await asyncio.sleep(0.3)
-    return {
-        "nick": net.nick,
-        "user": net.irc_user or net.nick,
-        "host": net.irc_host,
-        "modes": net.modes,
-    }
+    return _network_user_response(net)
 
 
 # -- Raw ------------------------------------------------------------------
@@ -594,12 +595,11 @@ async def set_session(
 @router.get("/status")
 async def status(
     _auth: TokenEntry = Depends(require_auth),
-) -> dict[str, Any]:
-    connected: int = sum(1 for n in proxy.networks.values() if n.state == "connected")
-    disconnected: int = len(proxy.networks) - connected
-    return {
-        "version": "0.2.0",
-        "uptime_seconds": int(time.time() - proxy.start_time),
-        "networks_connected": connected,
-        "networks_disconnected": disconnected,
-    }
+) -> StatusResponse:
+    connected = sum(1 for n in proxy.networks.values() if n.state == "connected")
+    return StatusResponse(
+        version="0.2.0",
+        uptime_seconds=int(time.time() - proxy.start_time),
+        networks_connected=connected,
+        networks_disconnected=len(proxy.networks) - connected,
+    )
