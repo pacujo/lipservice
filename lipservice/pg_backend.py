@@ -212,20 +212,20 @@ class PostgresBackend(StorageBackend):
                 " FROM networks ORDER BY name",
             )
             rows = cur.fetchall()
-        configs: list[NetworkConfig] = []
-        for row in rows:
-            cur.execute(
-                "SELECT channel FROM network_channels"
-                " WHERE network = %s ORDER BY channel",
-                (row["name"],),
-            )
-            channels = [r["channel"] for r in cur.fetchall()]
-            configs.append(NetworkConfig(
-                **{**row,
-                   "server_password": self._decrypt_opt(row["server_password"]),
-                   "nickserv_password": self._decrypt_opt(row["nickserv_password"]),
-                   "channels": channels},
-            ))
+            configs: list[NetworkConfig] = []
+            for row in rows:
+                cur.execute(
+                    "SELECT channel FROM network_channels"
+                    " WHERE network = %s ORDER BY channel",
+                    (row["name"],),
+                )
+                channels = [r["channel"] for r in cur.fetchall()]
+                configs.append(NetworkConfig(
+                    **{**row,
+                       "server_password": self._decrypt_opt(row["server_password"]),
+                       "nickserv_password": self._decrypt_opt(row["nickserv_password"]),
+                       "channels": channels},
+                ))
         return configs
 
     def save_network(self, config: NetworkConfig) -> None:
