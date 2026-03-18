@@ -241,7 +241,6 @@ class ProxyState:
                 host=data.get("host", ""),
             )
             if data["nick"] == net.nick:
-                self._inject_meta(net, f"Joined {channel}")
                 self._resolve_join(network_name, channel)
                 self._persist_network(net)
             await self._inject_channel_meta(
@@ -260,8 +259,6 @@ class ProxyState:
 
         elif event_type == "part":
             channel = data["channel"]
-            if data.get("nick") == net.nick:
-                self._inject_meta(net, f"Left {channel}")
             part_text = f"{data['nick']} has left"
             if data.get("message"):
                 part_text += f" ({data['message']})"
