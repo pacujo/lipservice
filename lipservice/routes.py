@@ -11,6 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 from lipservice.auth import TokenEntry, require_auth, token_store
 from lipservice.config import settings
 from lipservice.irc import IRCClient
+from lipservice.irc_format import strip as strip_irc
 from lipservice.models import (
     ChannelJoin,
     ChannelResponse,
@@ -388,6 +389,7 @@ async def list_channel_messages(
     limit: int = Query(50, ge=1, le=500),
     before: str | None = Query(None),
     after: str | None = Query(None),
+    around: str | None = Query(None),
     _auth: TokenEntry = Depends(require_auth),
 ) -> MessagePage:
     net = _get_network(network)
@@ -400,7 +402,74 @@ async def list_channel_messages(
     ch_msgs = proxy.storage.get_channel_messages(network, channel)
     meta = proxy.storage.get_meta_messages(network)
     merged = sorted(ch_msgs + meta, key=lambda m: m["id"])
-    return _paginate_messages(merged, limit, before, after)
+    return _paginate_messages(merged, limit, before, after, around)
+
+
+def _search_messages(
+    msgs: list[Message], query: str, anchor: str | None,
+    direction: str, limit: int,
+) -> MessagePage:
+    q_lower = query.lower()
+    if anchor:
+        idx = next(
+            (i for i, m in enumerate(msgs) if m["id"] == anchor), None,
+        )
+        if idx is None:
+            idx = len(msgs) - 1 if direction == "backward" else 0
+        else:
+            idx += -1 if direction == "backward" else 1
+    else:
+        idx = len(msgs) - 1 if direction == "backward" else 0
+    matches: list[Message] = []
+    step = -1 if direction == "backward" else 1
+    i = idx
+    while 0 <= i < len(msgs) and len(matches) < limit + 1:
+        text = strip_irc(msgs[i].get("text", ""))
+        if q_lower in text.lower():
+            matches.append(msgs[i])
+        i += step
+    has_more = len(matches) > limit
+    return MessagePage(messages=matches[:limit], has_more=has_more)
+
+
+@router.get("/networks/{network}/channels/{channel}/messages/search")
+async def search_channel_messages(
+    network: str,
+    channel: str,
+    q: str = Query(..., min_length=1),
+    anchor: str | None = Query(None),
+    direction: str = Query("backward"),
+    limit: int = Query(1, ge=1, le=50),
+    _auth: TokenEntry = Depends(require_auth),
+) -> MessagePage:
+    net = _get_network(network)
+    ch = net.channels.get(channel)
+    if not ch:
+        raise HTTPException(404, detail={
+            "error": "not_found",
+            "message": f'Channel "{channel}" not found.',
+        })
+    ch_msgs = proxy.storage.get_channel_messages(network, channel)
+    meta = proxy.storage.get_meta_messages(network)
+    merged = sorted(ch_msgs + meta, key=lambda m: m["id"])
+    return _search_messages(merged, q, anchor, direction, limit)
+
+
+@router.get("/networks/{network}/messages/{nick}/search")
+async def search_private_messages(
+    network: str,
+    nick: str,
+    q: str = Query(..., min_length=1),
+    anchor: str | None = Query(None),
+    direction: str = Query("backward"),
+    limit: int = Query(1, ge=1, le=50),
+    _auth: TokenEntry = Depends(require_auth),
+) -> MessagePage:
+    _get_network(network)
+    msgs = proxy.storage.get_private_messages(network, nick)
+    meta = proxy.storage.get_meta_messages(network)
+    merged = sorted(msgs + meta, key=lambda m: m["id"])
+    return _search_messages(merged, q, anchor, direction, limit)
 
 
 @router.post("/networks/{network}/channels/{channel}/messages", status_code=201)
@@ -453,13 +522,14 @@ async def list_private_messages(
     limit: int = Query(50, ge=1, le=500),
     before: str | None = Query(None),
     after: str | None = Query(None),
+    around: str | None = Query(None),
     _auth: TokenEntry = Depends(require_auth),
 ) -> MessagePage:
     _get_network(network)
     msgs = proxy.storage.get_private_messages(network, nick)
     meta = proxy.storage.get_meta_messages(network)
     merged = sorted(msgs + meta, key=lambda m: m["id"])
-    return _paginate_messages(merged, limit, before, after)
+    return _paginate_messages(merged, limit, before, after, around)
 
 
 @router.delete("/networks/{network}/messages/{nick}", status_code=204)
@@ -507,8 +577,22 @@ async def send_private_message(
 def _paginate_messages(
     buf: list[Message], limit: int,
     before: str | None, after: str | None,
+    around: str | None = None,
 ) -> MessagePage:
     msgs = list(buf)
+    if around:
+        idx = next((i for i, m in enumerate(msgs) if m["id"] == around), None)
+        if idx is not None:
+            half = limit // 2
+            start = max(0, idx - half)
+            end = start + limit
+            if end > len(msgs):
+                end = len(msgs)
+                start = max(0, end - limit)
+            return MessagePage(
+                messages=msgs[start:end],
+                has_more=start > 0,
+            )
     if before:
         idx = next((i for i, m in enumerate(msgs) if m["id"] == before), None)
         if idx is not None:
