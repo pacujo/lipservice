@@ -235,6 +235,8 @@ class ProxyState:
                 net.channels[channel] = ChannelState(name=channel)
             if data["nick"] == net.nick:
                 net.channels[channel].joined = True
+                net.irc_user = data.get("user", "") or net.irc_user
+                net.irc_host = data.get("host", "") or net.irc_host
             net.channels[channel].members[data["nick"]] = MemberInfo(
                 nick=data["nick"],
                 user=data.get("user", ""),

@@ -100,6 +100,28 @@ def _get_connected_network(name: str) -> tuple[NetworkState, IRCClient]:
     return net, net.client
 
 
+_IRC_MAX_LINE = 512
+
+def _max_text_bytes(net: NetworkState, target: str) -> int:
+    """Max UTF-8 bytes available for the text portion of a PRIVMSG."""
+    # :nick!user@host PRIVMSG target :text\r\n
+    nick = net.nick
+    user = net.irc_user or nick
+    host = net.irc_host or "unknown"
+    overhead = len(f":{nick}!{user}@{host} PRIVMSG {target} :\r\n".encode())
+    return _IRC_MAX_LINE - overhead
+
+
+def _check_message_length(net: NetworkState, target: str, text: str) -> None:
+    limit = _max_text_bytes(net, target)
+    text_bytes = len(text.encode("utf-8"))
+    if text_bytes > limit:
+        raise HTTPException(413, detail={
+            "error": "message_too_long",
+            "message": f"Message is {text_bytes} bytes; limit is {limit} for this target.",
+        })
+
+
 # -- Auth -----------------------------------------------------------------
 
 @router.post("/auth/token")
@@ -389,10 +411,13 @@ async def send_channel_message(
     _auth: TokenEntry = Depends(require_auth),
 ) -> Message:
     net, client = _get_connected_network(network)
+    wire_text = (f"\x01ACTION {body.text}\x01"
+                 if body.type == "action" else body.text)
+    _check_message_length(net, channel, wire_text)
     if body.type == "notice":
         await client.notice(channel, body.text)
     elif body.type == "action":
-        await client.privmsg(channel, f"\x01ACTION {body.text}\x01")
+        await client.privmsg(channel, wire_text)
     else:
         await client.privmsg(channel, body.text)
 
@@ -455,10 +480,13 @@ async def send_private_message(
     _auth: TokenEntry = Depends(require_auth),
 ) -> Message:
     net, client = _get_connected_network(network)
+    wire_text = (f"\x01ACTION {body.text}\x01"
+                 if body.type == "action" else body.text)
+    _check_message_length(net, nick, wire_text)
     if body.type == "notice":
         await client.notice(nick, body.text)
     elif body.type == "action":
-        await client.privmsg(nick, f"\x01ACTION {body.text}\x01")
+        await client.privmsg(nick, wire_text)
     else:
         await client.privmsg(nick, body.text)
 
