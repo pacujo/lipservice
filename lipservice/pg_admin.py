@@ -67,6 +67,12 @@ CREATE TABLE IF NOT EXISTS networks (
     auto_connect      BOOLEAN NOT NULL DEFAULT FALSE
 );
 
+CREATE TABLE IF NOT EXISTS network_channels (
+    network  TEXT NOT NULL REFERENCES networks (name) ON DELETE CASCADE,
+    channel  TEXT NOT NULL,
+    PRIMARY KEY (network, channel)
+);
+
 CREATE TABLE IF NOT EXISTS session (
     id               INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     current_network  TEXT,

@@ -39,6 +39,7 @@ class NetworkConfig(BaseModel):
     server_password: str | None = None
     nickserv_password: str | None = None
     auto_connect: bool = False
+    channels: list[str] = []
 
 
 class NetworkCreate(BaseModel):

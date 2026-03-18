@@ -212,14 +212,21 @@ class PostgresBackend(StorageBackend):
                 " FROM networks ORDER BY name",
             )
             rows = cur.fetchall()
-        return [
-            NetworkConfig(
+        configs: list[NetworkConfig] = []
+        for row in rows:
+            cur.execute(
+                "SELECT channel FROM network_channels"
+                " WHERE network = %s ORDER BY channel",
+                (row["name"],),
+            )
+            channels = [r["channel"] for r in cur.fetchall()]
+            configs.append(NetworkConfig(
                 **{**row,
                    "server_password": self._decrypt_opt(row["server_password"]),
-                   "nickserv_password": self._decrypt_opt(row["nickserv_password"])},
-            )
-            for row in rows
-        ]
+                   "nickserv_password": self._decrypt_opt(row["nickserv_password"]),
+                   "channels": channels},
+            ))
+        return configs
 
     def save_network(self, config: NetworkConfig) -> None:
         params = {
@@ -242,6 +249,16 @@ class PostgresBackend(StorageBackend):
                 "  auto_connect = EXCLUDED.auto_connect",
                 params,
             )
+            cur.execute(
+                "DELETE FROM network_channels WHERE network = %s",
+                (config.name,),
+            )
+            for ch in config.channels:
+                cur.execute(
+                    "INSERT INTO network_channels (network, channel)"
+                    " VALUES (%s, %s)",
+                    (config.name, ch),
+                )
 
     def delete_network(self, name: str) -> None:
         with self._conn.cursor() as cur:

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from lipservice.irc import IRCClient
-    from lipservice.models import Message
+    from lipservice.models import Message, NetworkConfig
     from lipservice.storage import StorageBackend
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -30,12 +30,13 @@ class ChannelState:
 
     def __init__(
         self, name: str, *, topic: str = "", topic_set_by: str = "",
+        joined: bool = True,
     ) -> None:
         self.name = name
         self.topic = topic
         self.topic_set_by = topic_set_by
         self.members: dict[str, MemberInfo] = {}
-        self.joined: bool = True
+        self.joined: bool = joined
 
 
 @dataclass
@@ -127,6 +128,18 @@ class ProxyState:
             "text": text,
         }
         self.storage.append_meta_message(net.name, msg)
+
+    def _persist_network(self, net: NetworkState) -> None:
+        from lipservice.models import NetworkConfig
+        self.storage.save_network(NetworkConfig(
+            name=net.name, host=net.host, port=net.port, tls=net.tls,
+            nick=net.nick, server_password=net.server_password,
+            nickserv_password=net.nickserv_password,
+            auto_connect=net.state in ("connected", "connecting"),
+            channels=[
+                name for name, ch in net.channels.items() if ch.joined
+            ],
+        ))
 
     async def _inject_channel_meta(
         self, network_name: str, channel: str, text: str,
@@ -230,6 +243,7 @@ class ProxyState:
             if data["nick"] == net.nick:
                 self._inject_meta(net, f"Joined {channel}")
                 self._resolve_join(network_name, channel)
+                self._persist_network(net)
             await self._inject_channel_meta(
                 network_name, channel,
                 f"{data['nick']} has joined",
@@ -260,6 +274,7 @@ class ProxyState:
                 if data["nick"] == net.nick:
                     ch.joined = False
                     ch.members.clear()
+                    self._persist_network(net)
             await self.event_bus.publish("part", {
                 "network": network_name, **data,
             })
@@ -290,6 +305,7 @@ class ProxyState:
                 net.channels[channel].members.pop(data["nick"], None)
                 if data["nick"] == net.nick:
                     del net.channels[channel]
+                    self._persist_network(net)
             await self.event_bus.publish("kick", {
                 "network": network_name, **data,
             })
@@ -427,6 +443,10 @@ class ProxyState:
                 nickserv_password=cfg.nickserv_password,
             )
             self.networks[cfg.name] = net
+            for ch_name in cfg.channels:
+                net.channels[ch_name] = ChannelState(
+                    name=ch_name, joined=True,
+                )
             self._inject_meta(net, "lipservice started")
             if cfg.auto_connect:
                 client = IRCClient(

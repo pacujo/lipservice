@@ -62,6 +62,9 @@ def _net_config(net: NetworkState) -> NetworkConfig:
         nick=net.nick, server_password=net.server_password,
         nickserv_password=net.nickserv_password,
         auto_connect=net.state in ("connected", "connecting"),
+        channels=[
+            name for name, ch in net.channels.items() if ch.joined
+        ],
     )
 
 
