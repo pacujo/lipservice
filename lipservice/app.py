@@ -9,8 +9,12 @@ from lipservice.routes import proxy, router
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     await proxy.restore_networks()
-    yield
-    await proxy.shutdown()
+    await proxy.start_db_monitor()
+    try:
+        yield
+    finally:
+        await proxy.stop_db_monitor()
+        await proxy.shutdown()
 
 
 app = FastAPI(

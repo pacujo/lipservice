@@ -58,6 +58,19 @@ class PostgresBackend(StorageBackend):
         with self._conn.cursor() as cur:
             yield cur
 
+    def ping(self) -> bool:
+        """Return True when the database accepts a trivial query."""
+        try:
+            with self._cursor() as cur:
+                cur.execute("SELECT 1")
+            return True
+        except Exception:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            return False
+
     def _verify_probe(self) -> None:
         with self._cursor() as cur:
             cur.execute("SELECT token FROM passphrase_probe WHERE id = 1")

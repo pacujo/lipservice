@@ -14,11 +14,17 @@ from lipservice.storage import MemoryBackend
 
 @pytest.fixture(autouse=True)
 def _reset_state():
+    if proxy._db_monitor_task and not proxy._db_monitor_task.done():
+        proxy._db_monitor_task.cancel()
     proxy.networks.clear()
     proxy.storage = MemoryBackend(max_backlog=1000)
     proxy.event_bus._counter = 0
     proxy.event_bus._subscribers.clear()
     proxy._join_waiters.clear()
+    proxy._db_ok = True
+    proxy._pending_db_meta.clear()
+    proxy._tmp_id_counter = 0
+    proxy._db_monitor_task = None
     token_store._tokens.clear()
 
 

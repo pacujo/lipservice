@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 log: logging.Logger = logging.getLogger(__name__)
 
 _RECONNECT_DELAY_MAX: float = 300.0
+_DB_PROBE_INTERVAL: float = 30.0
+_DB_LOST_TEXT: str = "Database connection lost"
+_DB_RESTORED_TEXT: str = "Database connection restored"
 
 
 @dataclass
@@ -99,6 +102,10 @@ class ProxyState:
         self._join_waiters: dict[
             tuple[str, str], asyncio.Future[None]
         ] = {}
+        self._db_ok: bool = True
+        self._pending_db_meta: list[tuple[str, Message]] = []
+        self._tmp_id_counter: int = 0
+        self._db_monitor_task: asyncio.Task[None] | None = None
 
     def expect_join(
         self, network: str, channel: str,
@@ -128,6 +135,86 @@ class ProxyState:
             "text": text,
         }
         self.storage.append_meta_message(net.name, msg)
+
+    async def start_db_monitor(self) -> None:
+        if not hasattr(self.storage, "ping"):
+            return
+        if self._db_monitor_task and not self._db_monitor_task.done():
+            return
+        self._db_monitor_task = asyncio.create_task(self._db_monitor_loop())
+
+    async def stop_db_monitor(self) -> None:
+        if self._db_monitor_task and not self._db_monitor_task.done():
+            self._db_monitor_task.cancel()
+            try:
+                await self._db_monitor_task
+            except asyncio.CancelledError:
+                pass
+            self._db_monitor_task = None
+
+    async def _db_monitor_loop(self) -> None:
+        ping = getattr(self.storage, "ping")
+        while True:
+            try:
+                ok = ping()
+                if ok and not self._db_ok:
+                    self._db_ok = True
+                    await self._on_db_restored()
+                elif not ok and self._db_ok:
+                    self._db_ok = False
+                    await self._on_db_lost()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Database health probe failed")
+            await asyncio.sleep(_DB_PROBE_INTERVAL)
+
+    async def _on_db_lost(self) -> None:
+        log.warning("Database connection lost")
+        for net in self.networks.values():
+            await self._emit_db_meta(net.name, _DB_LOST_TEXT, persist=False)
+
+    async def _on_db_restored(self) -> None:
+        log.info("Database connection restored")
+        for network_name, old_msg in self._pending_db_meta:
+            msg: Message = {
+                "id": self.storage.next_message_id(),
+                "time": old_msg["time"],
+                "from": "",
+                "type": "meta",
+                "text": old_msg["text"],
+            }
+            self.storage.append_meta_message(network_name, msg)
+        self._pending_db_meta.clear()
+        for net in self.networks.values():
+            await self._emit_db_meta(net.name, _DB_RESTORED_TEXT, persist=True)
+
+    async def _emit_db_meta(
+        self, network_name: str, text: str, *, persist: bool,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        if persist:
+            msg: Message = {
+                "id": self.storage.next_message_id(),
+                "time": now,
+                "from": "",
+                "type": "meta",
+                "text": text,
+            }
+            self.storage.append_meta_message(network_name, msg)
+        else:
+            self._tmp_id_counter += 1
+            msg = {
+                "id": f"tmp_{self._tmp_id_counter:06d}",
+                "time": now,
+                "from": "",
+                "type": "meta",
+                "text": text,
+            }
+            self._pending_db_meta.append((network_name, msg))
+        await self.event_bus.publish("message", {
+            "network": network_name, **msg,
+        })
 
     def _persist_network(self, net: NetworkState) -> None:
         from lipservice.models import NetworkConfig
