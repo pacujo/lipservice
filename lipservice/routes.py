@@ -25,6 +25,9 @@ from lipservice.models import (
     NetworkUpdate,
     NetworkUserResponse,
     NickChange,
+    PollItem,
+    PollRequest,
+    PollResponse,
     QueryPeer,
     RawCommand,
     Session,
@@ -718,6 +721,65 @@ async def set_session(
             parts = key.split("/", 1)
             if len(parts) == 2:
                 proxy.storage.set_pointer(parts[0], parts[1], last_read_id)
+
+
+# -- Background notification poll -----------------------------------------
+
+_POLL_LIMIT = 50
+
+
+def _messages_since(msgs: list[Message], pointer: str | None) -> list[Message]:
+    if pointer is None:
+        return []
+    return [
+        m for m in msgs
+        if m["id"] > pointer and m["type"] != "meta"
+    ]
+
+
+@router.post("/notifications/poll")
+async def poll_notifications(
+    body: PollRequest, _auth: TokenEntry = Depends(require_auth),
+) -> PollResponse:
+    items: list[PollItem] = []
+
+    for net_name, net in proxy.networks.items():
+        for ch_name, ch in net.channels.items():
+            if not ch.joined:
+                continue
+            key = f"{net_name}/{ch_name}"
+            pointer = body.pointers.get(key)
+            msgs = proxy.storage.get_channel_messages(net_name, ch_name)
+            for msg in _messages_since(msgs, pointer):
+                items.append(PollItem(
+                    network=net_name,
+                    channel=ch_name,
+                    id=msg["id"],
+                    time=msg["time"],
+                    from_nick=msg["from"],
+                    type=msg["type"],
+                    text=msg["text"],
+                ))
+
+        for nick in proxy.storage.list_private_peers(net_name):
+            key = f"{net_name}/{nick}"
+            pointer = body.pointers.get(key)
+            msgs = proxy.storage.get_private_messages(net_name, nick)
+            for msg in _messages_since(msgs, pointer):
+                items.append(PollItem(
+                    network=net_name,
+                    nick=nick,
+                    id=msg["id"],
+                    time=msg["time"],
+                    from_nick=msg["from"],
+                    type=msg["type"],
+                    text=msg["text"],
+                ))
+
+    items.sort(key=lambda item: item.id)
+    if len(items) > _POLL_LIMIT:
+        items = items[:_POLL_LIMIT]
+    return PollResponse(items=items)
 
 
 # -- Status ---------------------------------------------------------------

@@ -320,6 +320,36 @@ class TestRaw:
         assert resp.status_code == 502
 
 
+class TestPoll:
+    def test_poll_no_pointers(self, client, auth_headers, mock_network):
+        resp = client.post("/api/notifications/poll", json={
+            "pointers": {},
+        }, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["items"] == []
+
+    def test_poll_new_messages(self, client, auth_headers, mock_network):
+        resp = client.post("/api/notifications/poll", json={
+            "pointers": {"testnet/#test": "msg_000000000001"},
+        }, headers=auth_headers)
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["id"] == "msg_000000000002"
+        assert items[0]["from"] == "testbot"
+        assert items[0]["channel"] == "#test"
+
+    def test_poll_skips_meta(self, client, auth_headers, mock_network):
+        proxy.storage.append_channel_message("testnet", "#test", {
+            "id": "msg_000000000003", "time": "2026-03-14T10:02:00Z",
+            "from": "", "type": "meta", "text": "Someone joined",
+        })
+        resp = client.post("/api/notifications/poll", json={
+            "pointers": {"testnet/#test": "msg_000000000002"},
+        }, headers=auth_headers)
+        assert resp.json()["items"] == []
+
+
 class TestStatus:
     def test_status(self, client, auth_headers):
         resp = client.get("/api/status", headers=auth_headers)

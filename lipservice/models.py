@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # "from" is a Python keyword, so we use the functional form.
@@ -143,6 +143,25 @@ class SessionUpdate(BaseModel):
     current_channel: str | None = None
     current_query: str | None = None
     pointers: dict[str, str] | None = None
+
+
+class PollRequest(BaseModel):
+    pointers: dict[str, str] = {}
+
+
+class PollItem(BaseModel):
+    network: str
+    channel: str | None = None
+    nick: str | None = None
+    id: str
+    time: str
+    from_nick: str = Field(serialization_alias="from")
+    type: str
+    text: str
+
+
+class PollResponse(BaseModel):
+    items: list[PollItem]
 
 
 class ErrorResponse(BaseModel):
