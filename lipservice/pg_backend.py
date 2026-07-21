@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from typing import Iterator
+from collections.abc import Callable
+from typing import TypeVar
 
 import psycopg
 from psycopg.rows import dict_row
@@ -37,6 +37,8 @@ WHERE network = %s AND kind = 'private' AND target = %s
 ORDER BY id
 """
 
+_T = TypeVar("_T")
+
 
 class PostgresBackend(StorageBackend):
     """PostgreSQL message store using psycopg 3."""
@@ -50,31 +52,46 @@ class PostgresBackend(StorageBackend):
         self._passphrase = passphrase
         self._verify_probe()
 
-    @contextmanager
-    def _cursor(self) -> Iterator[psycopg.Cursor]:
-        if self._conn.closed:
-            self._conn = psycopg.connect(self._uri, row_factory=dict_row)
-            self._conn.autocommit = True
-        with self._conn.cursor() as cur:
-            yield cur
+    def _close_conn(self) -> None:
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+    def _reconnect(self) -> None:
+        self._close_conn()
+        self._conn = psycopg.connect(self._uri, row_factory=dict_row)
+        self._conn.autocommit = True
+
+    def _run(self, fn: Callable[[psycopg.Cursor], _T]) -> _T:
+        for attempt in range(2):
+            if self._conn.closed:
+                self._reconnect()
+            try:
+                with self._conn.cursor() as cur:
+                    return fn(cur)
+            except Exception:
+                self._close_conn()
+                if attempt == 1:
+                    raise
+        raise RuntimeError("unreachable")
 
     def ping(self) -> bool:
         """Return True when the database accepts a trivial query."""
         try:
-            with self._cursor() as cur:
-                cur.execute("SELECT 1")
+            self._run(lambda cur: cur.execute("SELECT 1"))
             return True
         except Exception:
-            try:
-                self._conn.close()
-            except Exception:
-                pass
+            self._close_conn()
             return False
 
     def _verify_probe(self) -> None:
-        with self._cursor() as cur:
-            cur.execute("SELECT token FROM passphrase_probe WHERE id = 1")
-            row = cur.fetchone()
+        row = self._run(
+            lambda cur: (
+                cur.execute("SELECT token FROM passphrase_probe WHERE id = 1"),
+                cur.fetchone(),
+            )[1],
+        )
         if not row:
             return
         try:
@@ -90,20 +107,21 @@ class PostgresBackend(StorageBackend):
             )
 
     def next_message_id(self) -> str:
-        with self._cursor() as cur:
+        def work(cur: psycopg.Cursor) -> str:
             cur.execute("SELECT nextval('message_id_seq')")
             row = cur.fetchone()
             assert row is not None
             val: int = row["nextval"]
-        return f"msg_{val:012d}"
+            return f"msg_{val:012d}"
+
+        return self._run(work)
 
     def _insert(
         self, network: str, kind: str, target: str, msg: Message,
     ) -> None:
-        with self._cursor() as cur:
-            cur.execute(_INSERT, {
-                **msg, "network": network, "kind": kind, "target": target,
-            })
+        self._run(lambda cur: cur.execute(_INSERT, {
+            **msg, "network": network, "kind": kind, "target": target,
+        }))
 
     def append_channel_message(
         self, network: str, channel: str, msg: Message,
@@ -123,49 +141,53 @@ class PostgresBackend(StorageBackend):
     def get_channel_messages(
         self, network: str, channel: str,
     ) -> list[Message]:
-        with self._cursor() as cur:
-            cur.execute(_SELECT_CHANNEL, (network, channel))
-            return cur.fetchall()  # type: ignore[return-value]
+        return self._run(lambda cur: (
+            cur.execute(_SELECT_CHANNEL, (network, channel)),
+            cur.fetchall(),
+        )[1])  # type: ignore[return-value]
 
     def get_meta_messages(self, network: str) -> list[Message]:
-        with self._cursor() as cur:
-            cur.execute(_SELECT_META, (network,))
-            return cur.fetchall()  # type: ignore[return-value]
+        return self._run(lambda cur: (
+            cur.execute(_SELECT_META, (network,)),
+            cur.fetchall(),
+        )[1])  # type: ignore[return-value]
 
     def get_private_messages(
         self, network: str, nick: str,
     ) -> list[Message]:
-        with self._cursor() as cur:
-            cur.execute(_SELECT_PRIVATE, (network, nick))
-            return cur.fetchall()  # type: ignore[return-value]
+        return self._run(lambda cur: (
+            cur.execute(_SELECT_PRIVATE, (network, nick)),
+            cur.fetchall(),
+        )[1])  # type: ignore[return-value]
 
     def list_private_peers(self, network: str) -> list[str]:
-        with self._cursor() as cur:
+        return self._run(lambda cur: (
             cur.execute(
                 "SELECT DISTINCT target FROM messages"
                 " WHERE network = %s AND kind = 'private'"
                 " ORDER BY target",
                 (network,),
-            )
-            return [row["target"] for row in cur.fetchall()]
+            ),
+            [row["target"] for row in cur.fetchall()],
+        )[1])
 
     def remove_private_peer(
         self, network: str, nick: str,
     ) -> None:
-        with self._cursor() as cur:
-            cur.execute(
-                "DELETE FROM messages"
-                " WHERE network = %s AND kind = 'private' AND target = %s",
-                (network, nick),
-            )
+        self._run(lambda cur: cur.execute(
+            "DELETE FROM messages"
+            " WHERE network = %s AND kind = 'private' AND target = %s",
+            (network, nick),
+        ))
 
     def get_session(self) -> Session:
-        with self._cursor() as cur:
+        row = self._run(lambda cur: (
             cur.execute(
                 "SELECT current_network, current_channel, current_query"
                 " FROM session WHERE id = 1",
-            )
-            row = cur.fetchone()
+            ),
+            cur.fetchone(),
+        )[1])
         return Session(
             current_network=row["current_network"] if row else None,
             current_channel=row["current_channel"] if row else None,
@@ -177,47 +199,47 @@ class PostgresBackend(StorageBackend):
         self, current_network: str | None,
         current_channel: str | None, current_query: str | None,
     ) -> None:
-        with self._cursor() as cur:
-            cur.execute(
-                "INSERT INTO session (id, current_network,"
-                " current_channel, current_query)"
-                " VALUES (1, %s, %s, %s)"
-                " ON CONFLICT (id) DO UPDATE SET"
-                " current_network = EXCLUDED.current_network,"
-                " current_channel = EXCLUDED.current_channel,"
-                " current_query = EXCLUDED.current_query",
-                (current_network, current_channel, current_query),
-            )
+        self._run(lambda cur: cur.execute(
+            "INSERT INTO session (id, current_network,"
+            " current_channel, current_query)"
+            " VALUES (1, %s, %s, %s)"
+            " ON CONFLICT (id) DO UPDATE SET"
+            " current_network = EXCLUDED.current_network,"
+            " current_channel = EXCLUDED.current_channel,"
+            " current_query = EXCLUDED.current_query",
+            (current_network, current_channel, current_query),
+        ))
 
     def get_pointer(self, network: str, target: str) -> str | None:
-        with self._cursor() as cur:
+        row = self._run(lambda cur: (
             cur.execute(
                 "SELECT last_read_id FROM pointers"
                 " WHERE network = %s AND target = %s",
                 (network, target),
-            )
-            row = cur.fetchone()
-            return row["last_read_id"] if row else None
+            ),
+            cur.fetchone(),
+        )[1])
+        return row["last_read_id"] if row else None
 
     def set_pointer(
         self, network: str, target: str, last_read_id: str,
     ) -> None:
-        with self._cursor() as cur:
-            cur.execute(
-                "INSERT INTO pointers (network, target, last_read_id)"
-                " VALUES (%s, %s, %s)"
-                " ON CONFLICT (network, target) DO UPDATE"
-                " SET last_read_id = EXCLUDED.last_read_id",
-                (network, target, last_read_id),
-            )
+        self._run(lambda cur: cur.execute(
+            "INSERT INTO pointers (network, target, last_read_id)"
+            " VALUES (%s, %s, %s)"
+            " ON CONFLICT (network, target) DO UPDATE"
+            " SET last_read_id = EXCLUDED.last_read_id",
+            (network, target, last_read_id),
+        ))
 
     def get_all_pointers(self) -> dict[str, str]:
-        with self._cursor() as cur:
-            cur.execute("SELECT network, target, last_read_id FROM pointers")
-            return {
+        return self._run(lambda cur: (
+            cur.execute("SELECT network, target, last_read_id FROM pointers"),
+            {
                 f"{r['network']}/{r['target']}": r["last_read_id"]
                 for r in cur.fetchall()
-            }
+            },
+        )[1])
 
     def _decrypt_opt(self, value: str | None) -> str | None:
         if value is None:
@@ -230,7 +252,7 @@ class PostgresBackend(StorageBackend):
         return encrypt(value, self._passphrase)
 
     def list_networks(self) -> list[NetworkConfig]:
-        with self._cursor() as cur:
+        def work(cur: psycopg.Cursor) -> list[NetworkConfig]:
             cur.execute(
                 "SELECT name, host, port, tls, nick,"
                 " server_password, nickserv_password, auto_connect"
@@ -251,7 +273,9 @@ class PostgresBackend(StorageBackend):
                        "nickserv_password": self._decrypt_opt(row["nickserv_password"]),
                        "channels": channels},
                 ))
-        return configs
+            return configs
+
+        return self._run(work)
 
     def save_network(self, config: NetworkConfig) -> None:
         params = {
@@ -259,7 +283,8 @@ class PostgresBackend(StorageBackend):
             "server_password": self._encrypt_opt(config.server_password),
             "nickserv_password": self._encrypt_opt(config.nickserv_password),
         }
-        with self._cursor() as cur:
+
+        def work(cur: psycopg.Cursor) -> None:
             cur.execute(
                 "INSERT INTO networks"
                 " (name, host, port, tls, nick,"
@@ -285,11 +310,16 @@ class PostgresBackend(StorageBackend):
                     (config.name, ch),
                 )
 
+        self._run(work)
+
     def delete_network(self, name: str) -> None:
-        with self._cursor() as cur:
-            cur.execute("DELETE FROM networks WHERE name = %s", (name,))
+        self._run(lambda cur: cur.execute(
+            "DELETE FROM networks WHERE name = %s", (name,),
+        ))
 
     def remove_network_data(self, network: str) -> None:
-        with self._cursor() as cur:
+        def work(cur: psycopg.Cursor) -> None:
             cur.execute("DELETE FROM messages WHERE network = %s", (network,))
             cur.execute("DELETE FROM pointers WHERE network = %s", (network,))
+
+        self._run(work)

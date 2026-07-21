@@ -250,6 +250,8 @@ lipservice/
 
 Brunt work by Claude (Anthropic).
 
+Also Composer (Cursor).
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
