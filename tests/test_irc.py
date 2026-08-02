@@ -1,4 +1,8 @@
-from lipservice.irc import IRCMessage, parse_irc, format_irc
+import asyncio
+import ssl
+from unittest.mock import AsyncMock, MagicMock
+
+from lipservice.irc import IRCClient, IRCMessage, format_irc, parse_irc
 
 
 class TestParseIRC:
@@ -104,3 +108,35 @@ class TestFormatIRC:
         reparsed = parse_irc(rebuilt)
         assert reparsed.command == msg.command
         assert reparsed.params == msg.params
+
+
+class TestIRCClientReadLoop:
+    def test_read_loop_ssl_close_notify(self) -> None:
+        events: list[tuple[str, str, dict[str, object]]] = []
+
+        async def on_event(
+            network: str, kind: str, data: dict[str, object],
+        ) -> None:
+            events.append((network, kind, data))
+
+        client = IRCClient(
+            "testnet", "irc.example.com", 6697, True,
+            "nick", "user", None, on_event,
+        )
+        client.connected = True
+        client.registered = True
+
+        reader = MagicMock()
+        reader.readline = AsyncMock(
+            side_effect=ssl.SSLError(
+                1, "[SSL: APPLICATION_DATA_AFTER_CLOSE_NOTIFY] "
+                "application data after close notify",
+            ),
+        )
+        client._reader = reader
+
+        asyncio.run(client._read_loop())
+
+        assert not client.connected
+        assert not client.registered
+        assert events == [("testnet", "network_state", {"state": "disconnected"})]

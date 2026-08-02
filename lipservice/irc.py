@@ -214,7 +214,7 @@ class IRCClient:
                     await self._handle(msg)
                 except Exception:
                     pass
-        except (asyncio.CancelledError, ConnectionError):
+        except (asyncio.CancelledError, ConnectionError, ssl.SSLError):
             pass
         finally:
             self.connected = False
